@@ -47,7 +47,7 @@ const Polls = () => {
   return (
     <div className="pb-20 pt-16 px-4 space-y-4 max-w-2xl mx-auto">
       <div className="flex items-center justify-between pt-4">
-        <h2 className="text-2xl font-bold text-foreground">Enquetes</h2>
+        <h2 className="text-3xl font-extrabold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">Enquetes</h2>
         <Button size="icon" className="rounded-full h-12 w-12">
           <Plus className="h-6 w-6" />
         </Button>

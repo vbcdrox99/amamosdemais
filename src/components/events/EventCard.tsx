@@ -29,18 +29,17 @@ export const EventCard = ({
 }: EventCardProps) => {
   return (
     <Link to={`/evento/${id}`}>
-      <Card className="overflow-hidden bg-card border-border hover:border-primary/50 transition-all animate-slide-up cursor-pointer">
+      <Card className="group overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-md hover:border-primary/50 transition-all hover:shadow-lg hover:shadow-primary/10 cursor-pointer">
         <div className="relative h-48 overflow-hidden">
           <img
             src={coverImage}
             alt={title}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
-          <div className="absolute top-3 right-3 bg-black/80 backdrop-blur-sm px-3 py-2 rounded-lg">
-            <div className="text-center">
-              <div className="text-xs text-muted-foreground">OUT</div>
-              <div className="text-xl font-bold text-foreground">28</div>
-            </div>
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/25 to-transparent" />
+          <div className="absolute top-3 right-3 px-3 py-2 rounded-lg bg-gradient-to-br from-emerald-600 to-sky-600 text-white shadow-md">
+            <div className="text-xs opacity-80">Data</div>
+            <div className="text-sm font-semibold">{date}</div>
           </div>
         </div>
         
@@ -49,13 +48,13 @@ export const EventCard = ({
             {title}
           </h3>
           
-          <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4" />
+              <Clock className="h-4 w-4 text-emerald-400" />
               <span>{time}</span>
             </div>
             <div className="flex items-center gap-2">
-              <MapPin className="h-4 w-4" />
+              <MapPin className="h-4 w-4 text-sky-400" />
               <span>{location}</span>
             </div>
           </div>

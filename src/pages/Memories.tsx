@@ -42,7 +42,7 @@ const mockAlbums: MemoryAlbum[] = [
 const Memories = () => {
   return (
     <div className="pb-20 pt-16 px-4 max-w-2xl mx-auto">
-      <h2 className="text-2xl font-bold text-foreground pt-4 pb-4">
+      <h2 className="text-3xl font-extrabold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent pt-4 pb-4">
         Memórias
       </h2>
 

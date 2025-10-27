@@ -1,22 +1,25 @@
 import { Bell, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useState } from "react";
 
 export const Header = () => {
+  const [logoSrc, setLogoSrc] = useState("/AMAMOS DE MAIS.png");
+
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-background border-b border-border pt-safe">
+    <header className="fixed top-0 left-0 right-0 z-[1100] bg-black/80 backdrop-blur border-b border-white/20 pt-safe">
       <div className="flex items-center justify-between h-14 px-4">
-        <h1 className="text-2xl font-bold text-foreground">CAPS</h1>
-        
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="h-5 w-5" />
-            <span className="absolute top-1 right-1 h-2 w-2 bg-primary rounded-full" />
-          </Button>
-          
-          <Button variant="ghost" size="icon">
-            <MessageCircle className="h-5 w-5" />
-          </Button>
+        <div className="flex items-center justify-center">
+          <img
+            src={logoSrc}
+            alt="Amamos de Mais"
+            className="h-7 w-auto"
+            onError={() => setLogoSrc("/placeholder.svg")}
+          />
         </div>
+
+        <h1 className="text-xl sm:text-2xl font-extrabold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">
+          AMAMOS DE MAIS
+        </h1>
       </div>
     </header>
   );

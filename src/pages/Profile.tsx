@@ -12,32 +12,33 @@ const Profile = () => {
   };
 
   return (
-    <div className="min-h-screen pb-20 pt-16">
-      <div className="px-4 py-6 space-y-6 max-w-2xl mx-auto">
+    <div className="min-h-screen bg-black">
+      <div className="pb-20 pt-16 px-4 space-y-6 max-w-2xl mx-auto">
         {/* Profile Header */}
         <div className="flex flex-col items-center text-center space-y-4">
-          <Avatar className="h-32 w-32 border-4 border-primary">
+          <Avatar className="h-32 w-32 border-4 border-white/30">
             <AvatarImage src={user.avatar} />
-            <AvatarFallback className="bg-primary text-primary-foreground text-4xl">
+            <AvatarFallback className="bg-white/10 text-white text-4xl">
               {user.name.charAt(0)}
             </AvatarFallback>
           </Avatar>
           
           <div className="space-y-2">
-            <h1 className="text-2xl font-bold text-foreground">{user.name}</h1>
-            <p className="text-muted-foreground max-w-sm">{user.bio}</p>
+            <h1 className="text-3xl font-extrabold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">
+              {user.name}
+            </h1>
+            <p className="text-sm text-white/70 max-w-sm">{user.bio}</p>
           </div>
         </div>
 
         {/* Interest Tags */}
         <div className="space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Interesses</h2>
+          <h2 className="text-lg font-semibold text-white">Interesses</h2>
           <div className="flex flex-wrap gap-2">
             {user.interests.map((interest, index) => (
               <Badge
                 key={index}
-                variant="secondary"
-                className="text-sm px-4 py-2 bg-secondary hover:bg-secondary/80 cursor-pointer"
+                className="text-sm px-4 py-2 border-white/20 bg-white/5 text-white hover:bg-white/10 cursor-pointer"
               >
                 {interest}
               </Badge>
@@ -47,10 +48,17 @@ const Profile = () => {
 
         {/* Action Buttons */}
         <div className="flex gap-3 pt-4">
-          <Button className="flex-1 h-11 font-semibold">
+          <Button
+            className="flex-1 h-11 font-semibold border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
+            variant="outline"
+          >
             Editar Perfil
           </Button>
-          <Button variant="outline" size="icon" className="h-11 w-11">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-11 w-11 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
+          >
             <Settings className="h-5 w-5" />
           </Button>
         </div>
@@ -58,16 +66,16 @@ const Profile = () => {
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 pt-6">
           <div className="text-center space-y-1">
-            <div className="text-2xl font-bold text-primary">23</div>
-            <div className="text-sm text-muted-foreground">Rolês</div>
+            <div className="text-2xl font-bold text-white">23</div>
+            <div className="text-sm text-white/70">Rolês</div>
           </div>
           <div className="text-center space-y-1">
-            <div className="text-2xl font-bold text-primary">45</div>
-            <div className="text-sm text-muted-foreground">Amigos</div>
+            <div className="text-2xl font-bold text-white">45</div>
+            <div className="text-sm text-white/70">Amigos</div>
           </div>
           <div className="text-center space-y-1">
-            <div className="text-2xl font-bold text-primary">12</div>
-            <div className="text-sm text-muted-foreground">Fotos</div>
+            <div className="text-2xl font-bold text-white">12</div>
+            <div className="text-sm text-white/70">Fotos</div>
           </div>
         </div>
       </div>
