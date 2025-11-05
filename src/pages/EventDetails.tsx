@@ -1,17 +1,23 @@
 import { useState } from "react";
-import { ArrowLeft, MapPin, Clock, Calendar, ExternalLink } from "lucide-react";
+import { ArrowLeft, MapPin, Clock, Calendar, ExternalLink, Share2 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { useAuthRole } from "@/hooks/useAuthRole";
 
 type RsvpStatus = "going" | "maybe" | "not-going" | null;
 
 const EventDetails = () => {
   const navigate = useNavigate();
   const { id } = useParams();
+  const { permissions, flags } = useAuthRole();
   const [rsvpStatus, setRsvpStatus] = useState<RsvpStatus>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
   
   // Mock data
   const event = {
@@ -43,6 +49,29 @@ const EventDetails = () => {
       { name: "Amanda Silva", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Amanda" },
       { name: "Felipe Santos", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Felipe" },
     ],
+  };
+
+  const { toast } = useToast();
+
+  const eventUrl = `${window.location.origin}/evento/${id ?? ""}`;
+  const defaultInvite = `Bora pro rolê? ${event.title} — ${event.date} às ${event.time} em ${event.location}`;
+  const [inviteMessage, setInviteMessage] = useState<string>(defaultInvite);
+
+  const fullInvite = `${inviteMessage}\n\n${eventUrl}`;
+
+  const handleCopyInvite = async () => {
+    try {
+      await navigator.clipboard.writeText(fullInvite);
+      toast({ title: "Link copiado!", description: "Convite com informações foi copiado para a área de transferência." });
+    } catch {
+      toast({ title: "Não foi possível copiar", description: "Tente novamente mais tarde." });
+    }
+  };
+
+  const handleOpenWhatsApp = () => {
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(fullInvite)}`;
+    window.open(waUrl, "_blank");
+    toast({ title: "Abrindo WhatsApp Web", description: "Seu convite será colado na conversa." });
   };
 
   return (
@@ -116,28 +145,104 @@ const EventDetails = () => {
             </p>
           </div>
 
+          {/* Invite / Share */}
+          <Card className="p-4 bg-card border-border">
+            <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+              <div className="text-sm text-muted-foreground">
+                Gere um convite com link e informações do rolê.
+              </div>
+              <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full sm:w-auto h-10 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
+                  >
+                    <Share2 className="h-4 w-4 mr-2" /> Convidar no WhatsApp
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Convite do rolê</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <Textarea
+                      value={inviteMessage}
+                      onChange={(e) => setInviteMessage(e.target.value)}
+                      placeholder="Digite a mensagem do convite"
+                      className="min-h-[100px]"
+                    />
+                    <div className="text-xs text-muted-foreground">
+                      Ao copiar, enviaremos o link junto com a mensagem acima.
+                    </div>
+                  </div>
+                  <DialogFooter className="gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={handleCopyInvite}
+                    >
+                      Copiar link
+                    </Button>
+                    <Button onClick={handleOpenWhatsApp}>
+                      Abrir WhatsApp Web
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </Card>
+
           {/* RSVP Buttons */}
           <div className="space-y-3">
             <h3 className="font-semibold text-foreground">Você vai?</h3>
             <div className="grid grid-cols-3 gap-3">
               <Button
                 variant={rsvpStatus === "going" ? "rsvpActive" : "rsvp"}
-                onClick={() => setRsvpStatus("going")}
+                onClick={() => {
+                  if (!permissions.canConfirmPresence) {
+                    toast({
+                      title: "Ação não permitida",
+                      description: flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre com sua conta e aguarde aprovação.",
+                    });
+                    return;
+                  }
+                  setRsvpStatus("going");
+                }}
                 className="h-12 font-semibold"
+                disabled={!permissions.canConfirmPresence}
               >
                 VOU
               </Button>
               <Button
                 variant={rsvpStatus === "maybe" ? "rsvpActive" : "rsvp"}
-                onClick={() => setRsvpStatus("maybe")}
+                onClick={() => {
+                  if (!permissions.canConfirmPresence) {
+                    toast({
+                      title: "Ação não permitida",
+                      description: flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre com sua conta e aguarde aprovação.",
+                    });
+                    return;
+                  }
+                  setRsvpStatus("maybe");
+                }}
                 className="h-12 font-semibold"
+                disabled={!permissions.canConfirmPresence}
               >
                 TALVEZ
               </Button>
               <Button
                 variant={rsvpStatus === "not-going" ? "rsvpActive" : "rsvp"}
-                onClick={() => setRsvpStatus("not-going")}
+                onClick={() => {
+                  if (!permissions.canConfirmPresence) {
+                    toast({
+                      title: "Ação não permitida",
+                      description: flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre com sua conta e aguarde aprovação.",
+                    });
+                    return;
+                  }
+                  setRsvpStatus("not-going");
+                }}
                 className="h-12 font-semibold"
+                disabled={!permissions.canConfirmPresence}
               >
                 NÃO VOU
               </Button>

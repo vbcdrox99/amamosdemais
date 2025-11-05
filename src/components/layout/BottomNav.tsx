@@ -1,22 +1,25 @@
 import { Calendar, BarChart3, PlusCircle, Camera, User } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { useAuthRole } from "@/hooks/useAuthRole";
 
-const navItems = [
-  { icon: Calendar, label: "Rolês", path: "/" },
-  { icon: BarChart3, label: "Enquetes", path: "/enquetes" },
-  { icon: PlusCircle, label: "Criar", path: "/criar", isSpecial: true },
-  { icon: Camera, label: "Memórias", path: "/memorias" },
-  { icon: User, label: "Perfil", path: "/perfil" },
-];
+type NavItem = { icon: any; label: string; path: string; isSpecial?: boolean };
 
 export const BottomNav = () => {
+  const { flags, permissions } = useAuthRole();
+  const navItems: NavItem[] = [
+    { icon: Calendar, label: "Rolês", path: "/" },
+    { icon: BarChart3, label: "Enquetes", path: permissions.canCreatePolls ? "/enquetes" : "/auth" },
+    { icon: PlusCircle, label: "Criar", path: permissions.canCreateEvents ? "/criar" : "/auth", isSpecial: true },
+    { icon: Camera, label: "Memórias", path: "/memorias" },
+    { icon: User, label: flags.isAuthenticated ? "Perfil" : "Entrar", path: flags.isAuthenticated ? "/perfil" : "/auth" },
+  ];
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-[1100] bg-black/80 backdrop-blur border-t border-white/20 pb-safe">
       <div className="flex items-center justify-around h-16">
         {navItems.map((item) => (
           <NavLink
-            key={item.path}
+            key={`${item.label}-${item.path}`}
             to={item.path}
             className={({ isActive }) =>
               cn(

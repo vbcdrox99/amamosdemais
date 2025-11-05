@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { useAuthRole } from "@/hooks/useAuthRole";
 
 interface Poll {
   id: string;
@@ -39,6 +40,7 @@ const mockPolls: Poll[] = [
 
 const Polls = () => {
   const [votedPolls, setVotedPolls] = useState<Set<string>>(new Set());
+  const { permissions, flags } = useAuthRole();
 
   const handleVote = (pollId: string, optionIndex: number) => {
     setVotedPolls((prev) => new Set(prev).add(pollId));
@@ -48,7 +50,7 @@ const Polls = () => {
     <div className="pb-20 pt-16 px-4 space-y-4 max-w-2xl mx-auto">
       <div className="flex items-center justify-between pt-4">
         <h2 className="text-3xl font-extrabold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">Enquetes</h2>
-        <Button size="icon" className="rounded-full h-12 w-12">
+        <Button size="icon" className="rounded-full h-12 w-12" disabled={!permissions.canCreatePolls} title={!permissions.canCreatePolls ? (flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre e aguarde aprovação para criar enquetes.") : undefined}>
           <Plus className="h-6 w-6" />
         </Button>
       </div>

@@ -2,8 +2,14 @@ import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { useAuthRole } from "@/hooks/useAuthRole";
+import { useToast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 
 const Profile = () => {
+  const { permissions, flags } = useAuthRole();
+  const { toast } = useToast();
+  const navigate = useNavigate();
   const user = {
     name: "Juliana Silva",
     avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Juliana",
@@ -51,6 +57,18 @@ const Profile = () => {
           <Button
             className="flex-1 h-11 font-semibold border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
             variant="outline"
+            disabled={!permissions.canEditOwnProfile}
+            title={!permissions.canEditOwnProfile ? (flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre e aguarde aprovação para editar seu perfil.") : undefined}
+            onClick={() => {
+              if (!permissions.canEditOwnProfile) {
+                toast({
+                  title: "Edição não permitida",
+                  description: flags.isAuthenticated ? "Sua conta ainda está pendente de aprovação." : "Entre com sua conta e aguarde aprovação por um ADMIN.",
+                });
+                return;
+              }
+              navigate("/perfil/editar");
+            }}
           >
             Editar Perfil
           </Button>
@@ -62,6 +80,12 @@ const Profile = () => {
             <Settings className="h-5 w-5" />
           </Button>
         </div>
+
+        {!permissions.canEditOwnProfile && (
+          <div className="pt-2 text-xs text-white/70">
+            Somente contas <span className="font-semibold text-white">aprovadas</span> podem editar o perfil. Após a aprovação pelo ADMIN, este botão ficará disponível.
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 pt-6">

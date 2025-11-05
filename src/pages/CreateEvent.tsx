@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
+import { useAuthRole } from "@/hooks/useAuthRole";
 import LocationPickerLeaflet, { LatLng } from "../components/events/LocationPickerLeaflet";
 
 const CreateEvent = () => {
@@ -21,6 +22,7 @@ const CreateEvent = () => {
   const [maxParticipants, setMaxParticipants] = useState<number | "">("");
   const [eventStatus, setEventStatus] = useState<"confirmado" | "sugestao">("confirmado");
   const { toast } = useToast();
+  const { permissions, flags, profile } = useAuthRole();
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -50,6 +52,10 @@ const CreateEvent = () => {
 
       <form className="px-4 py-6 space-y-6 max-w-2xl mx-auto" onSubmit={async (e) => {
         e.preventDefault();
+        if (!permissions.canCreateEvents) {
+          toast({ title: "Ação não permitida", description: flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre com sua conta e aguarde aprovação." });
+          return;
+        }
         const form = e.currentTarget as HTMLFormElement;
         const formData = new FormData(form);
         const name = formData.get("name") as string | null;
@@ -70,19 +76,23 @@ const CreateEvent = () => {
           }
         }
       
+        // Converte data e hora para timestamptz
+        let eventTimestamp: string | null = null;
+        if (date && time) {
+          const iso = new Date(`${date}T${time}:00`).toISOString();
+          eventTimestamp = iso;
+        }
+
+        // Mapeia para colunas reais da tabela public.events
         const payload = {
-          name,
+          title: name,
           description,
-          date,
-          time,
-          location_name: locationName || null,
-          location_lat: mapLocation?.lat ?? null,
-          location_lng: mapLocation?.lng ?? null,
-          has_limit: limitEnabled,
-          min_participants: limitEnabled && typeof minParticipants === "number" ? minParticipants : null,
-          max_participants: limitEnabled && typeof maxParticipants === "number" ? maxParticipants : null,
-          cover_image: coverImage,
-          status: eventStatus,
+          cover_image_url: coverImage ?? null,
+          event_timestamp: eventTimestamp,
+          location_text: locationName || null,
+          latitude: mapLocation?.lat ?? null,
+          longitude: mapLocation?.lng ?? null,
+          created_by: profile?.id ?? null,
         };
       
         if (!supabase) {
@@ -272,10 +282,17 @@ const CreateEvent = () => {
           </div>
         </Card>
 
+        {!permissions.canCreateEvents && (
+          <div className="text-xs text-white/70 -mt-2">
+            Para criar rolês, faça login e aguarde aprovação do ADMIN.
+          </div>
+        )}
+
         <Button
           type="submit"
           variant="outline"
           className="w-full h-12 text-base font-semibold border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
+          disabled={!permissions.canCreateEvents}
         >
           Publicar Rolê!
         </Button>
