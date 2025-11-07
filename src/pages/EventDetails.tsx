@@ -1,7 +1,9 @@
-import { useState } from "react";
-import { ArrowLeft, MapPin, Clock, Calendar, ExternalLink, Share2 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, MapPin, Clock, Calendar, Share2, Copy } from "lucide-react";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
@@ -9,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogT
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthRole } from "@/hooks/useAuthRole";
+import { supabase } from "@/lib/supabase";
+import { formatPhoneBR } from "@/lib/utils";
 
 type RsvpStatus = "going" | "maybe" | "not-going" | null;
 
@@ -17,65 +21,448 @@ const EventDetails = () => {
   const { id } = useParams();
   const { permissions, flags } = useAuthRole();
   const [rsvpStatus, setRsvpStatus] = useState<RsvpStatus>(null);
+  const [rsvpLoading, setRsvpLoading] = useState(false);
+  const [checkinConfirmed, setCheckinConfirmed] = useState(false);
+  const [checkinDialogOpen, setCheckinDialogOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
-  
-  // Mock data
-  const event = {
-    title: "Churrasco na Laje do Zé",
-    coverImage: "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=1200&q=80",
-    date: "Sábado, 28 de Outubro",
-    time: "14:00",
-    location: "Vila Madalena, São Paulo",
-    description: "Bora pro churrasco mais top do ano! Vai ter muita carne, cerveja gelada, música boa e aquela resenha de qualidade. Cada um leva algo (coordenamos no chat). Não esquece o guaraná!",
-    going: [
-      { name: "João Silva", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=João" },
-      { name: "Maria Santos", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Maria" },
-      { name: "Pedro Costa", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Pedro" },
-      { name: "Ana Lima", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Ana" },
-      { name: "Carlos Mendes", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Carlos" },
-      { name: "Julia Ferreira", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Julia" },
-      { name: "Bruno Alves", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Bruno" },
-      { name: "Rafael Santos", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Rafael" },
-      { name: "Camila Souza", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Camila" },
-      { name: "Lucas Oliveira", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Lucas" },
-      { name: "Fernanda Costa", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Fernanda" },
-      { name: "Rodrigo Lima", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Rodrigo" },
-      { name: "Beatriz Souza", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Beatriz" },
-    ],
-    maybe: [
-      { name: "Gabriel Martins", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Gabriel" },
-      { name: "Larissa Alves", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Larissa" },
-      { name: "Thiago Ribeiro", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Thiago" },
-      { name: "Amanda Silva", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Amanda" },
-      { name: "Felipe Santos", avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Felipe" },
-    ],
-  };
-
   const { toast } = useToast();
 
-  const eventUrl = `${window.location.origin}/evento/${id ?? ""}`;
-  const defaultInvite = `Bora pro rolê? ${event.title} — ${event.date} às ${event.time} em ${event.location}`;
-  const [inviteMessage, setInviteMessage] = useState<string>(defaultInvite);
+  type EventRow = {
+    id: string;
+    title: string;
+    description: string | null;
+    cover_image_url: string | null;
+    event_timestamp: string | null;
+    location_text: string | null;
+    created_by?: string | null;
+  };
 
+  const [event, setEvent] = useState<EventRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sameDayEvents, setSameDayEvents] = useState<EventRow[]>([]);
+  const [loadingSameDay, setLoadingSameDay] = useState(false);
+  // Participantes (RSVPs)
+  const [participants, setParticipants] = useState<Array<{
+    user_id: string;
+    status: Exclude<RsvpStatus, null>;
+    full_name: string | null;
+    avatar_url: string | null;
+    phone_number: string | null;
+  }>>([]);
+  const [participantsLoading, setParticipantsLoading] = useState(false);
+
+  const loadParticipants = async () => {
+    if (!id) return;
+    try {
+      setParticipantsLoading(true);
+      const { data, error } = await supabase
+        .from("event_rsvps")
+        .select("user_id,status,profiles:profiles(id,full_name,avatar_url,phone_number)")
+        .eq("event_id", Number(id));
+      if (error) throw error;
+      const mapped = (data ?? []).map((row: any) => ({
+        user_id: row.user_id as string,
+        status: row.status as Exclude<RsvpStatus, null>,
+        full_name: row.profiles?.full_name ?? null,
+        avatar_url: row.profiles?.avatar_url ?? null,
+        phone_number: row.profiles?.phone_number ?? null,
+      }));
+      setParticipants(mapped);
+    } catch (e: any) {
+      toast({ title: "Erro ao carregar participantes", description: e?.message ?? String(e), variant: "destructive" });
+    } finally {
+      setParticipantsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadParticipants();
+    // Recarrega quando o RSVP ou o check-in do usuário muda
+  }, [id, rsvpStatus, checkinConfirmed]);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!id) return;
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("events")
+        .select("id,title,description,cover_image_url,event_timestamp,location_text,created_by")
+        .eq("id", Number(id))
+        .maybeSingle();
+      setLoading(false);
+      if (error) {
+        toast({ title: "Erro ao carregar evento", description: error.message, variant: "destructive" });
+        return;
+      }
+      if (!data) {
+        toast({ title: "Evento não encontrado", description: "Esse rolê pode ter sido removido." });
+        setEvent(null);
+        return;
+      }
+      setEvent(data as EventRow);
+    };
+    load();
+  }, [id]);
+
+  // Carrega RSVP do usuário para este evento
+  const { profile } = useAuthRole() as any;
+  useEffect(() => {
+    const loadRsvp = async () => {
+      if (!profile?.id || !id) return;
+      const { data, error } = await supabase
+        .from("event_rsvps")
+        .select("status,checkin_confirmed")
+        .eq("event_id", Number(id))
+        .eq("user_id", profile.id)
+        .maybeSingle();
+      if (!error && data) {
+        setRsvpStatus((data as any).status as RsvpStatus);
+        setCheckinConfirmed(!!(data as any).checkin_confirmed);
+      }
+    };
+    loadRsvp();
+  }, [profile?.id, id]);
+
+  const handleUpdateRsvp = async (status: RsvpStatus) => {
+    if (!permissions.canConfirmPresence) {
+      // Mesmo sem aprovação, considerar tentativa como interação para priorizar o rolê
+      try {
+        const eid = String(id ?? "");
+        if (eid) {
+          localStorage.setItem("pinned_event_id", eid);
+          if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+            const bc = new BroadcastChannel("home-bump");
+            bc.postMessage({ eventId: eid });
+            bc.close();
+          }
+        }
+      } catch {}
+      toast({
+        title: "Ação não permitida",
+        description: flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre com sua conta e aguarde aprovação.",
+      });
+      return;
+    }
+    if (!profile?.id || !id) return;
+    try {
+      setRsvpLoading(true);
+      const payload: any = { event_id: Number(id), user_id: profile.id, status };
+      const { error } = await supabase.from("event_rsvps").upsert(payload, { onConflict: "event_id,user_id" });
+      setRsvpLoading(false);
+      if (error) {
+        toast({ title: "Erro ao salvar presença", description: error.message, variant: "destructive" });
+        return;
+      }
+      setRsvpStatus(status);
+      // Marca este rolê como fixado para reordenar na Home e notifica via BroadcastChannel
+      try {
+        const eid = String(id);
+        localStorage.setItem("pinned_event_id", eid);
+        const bc = new BroadcastChannel("home-bump");
+        bc.postMessage({ eventId: eid });
+        bc.close();
+      } catch {}
+      toast({ title: "Presença atualizada" });
+      // Navega para a Home para refletir imediatamente na lista
+      try { navigate("/"); } catch {}
+      // Atualiza a lista de participantes após mudança de RSVP
+      loadParticipants();
+    } catch (e: any) {
+      setRsvpLoading(false);
+      toast({ title: "Erro inesperado", description: e?.message ?? String(e), variant: "destructive" });
+    }
+  };
+
+  const dateStr = useMemo(() => {
+    if (!event?.event_timestamp) return "Sem data";
+    try {
+      const d = new Date(event.event_timestamp);
+      return d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+    } catch {
+      return "Sem data";
+    }
+  }, [event?.event_timestamp]);
+
+  const timeStr = useMemo(() => {
+    if (!event?.event_timestamp) return "";
+    try {
+      const d = new Date(event.event_timestamp);
+      return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return "";
+    }
+  }, [event?.event_timestamp]);
+
+  // Definir janela de check-in ANTES de qualquer uso
+  const isCheckinWindow = useMemo(() => {
+    if (!event?.event_timestamp) return false;
+    const now = new Date();
+    const eventDate = new Date(event.event_timestamp);
+    const diffMs = eventDate.getTime() - now.getTime();
+    return diffMs > 0 && diffMs <= 48 * 60 * 60 * 1000; // até 48h antes
+  }, [event?.event_timestamp]);
+
+  const eventUrl = `${window.location.origin}/evento/${id ?? ""}`;
+  const [inviteMessage, setInviteMessage] = useState<string>("");
+  // Templates de convite para modos Normal vs Check-in
+  const buildNormalInvite = (ev: EventRow | null) => {
+    if (!ev) return "";
+    const when = `${dateStr}${timeStr ? ` às ${timeStr}` : ""}`;
+    const where = ev.location_text ?? "local a definir";
+    return `Bora pro rolê? ${ev.title} — ${when} em ${where}`.trim();
+  };
+  const buildCheckinInvite = (ev: EventRow | null) => {
+    if (!ev) return "";
+    const when = `${dateStr}${timeStr ? ` às ${timeStr}` : ""}`;
+    const where = ev.location_text ?? "local a definir";
+    return `Check-in aberto! ${ev.title} — ${when} em ${where}. Faça seu check-in ao chegar 👊`.trim();
+  };
+  useEffect(() => {
+    if (!event) return;
+    const defaultInvite = isCheckinWindow ? buildCheckinInvite(event) : buildNormalInvite(event);
+    setInviteMessage(defaultInvite);
+  }, [event, dateStr, timeStr, isCheckinWindow]);
   const fullInvite = `${inviteMessage}\n\n${eventUrl}`;
 
   const handleCopyInvite = async () => {
     try {
       await navigator.clipboard.writeText(fullInvite);
       toast({ title: "Link copiado!", description: "Convite com informações foi copiado para a área de transferência." });
+      // Interação: prioriza este rolê na Home
+      try {
+        const eid = String(id ?? "");
+        if (eid) {
+          localStorage.setItem("pinned_event_id", eid);
+          if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+            const bc = new BroadcastChannel("home-bump");
+            bc.postMessage({ eventId: eid });
+            bc.close();
+          }
+        }
+      } catch {}
     } catch {
       toast({ title: "Não foi possível copiar", description: "Tente novamente mais tarde." });
     }
   };
 
   const handleOpenWhatsApp = () => {
-    const waUrl = `https://wa.me/?text=${encodeURIComponent(fullInvite)}`;
+    // Escolhe esquema de abertura: mobile vs web
+    const text = encodeURIComponent(fullInvite);
+    const isMobile = /Android|iPhone|iPad|iPod|Opera Mini|IEMobile/i.test(navigator.userAgent);
+    const waUrl = isMobile ? `whatsapp://send?text=${text}` : `https://wa.me/?text=${text}`;
     window.open(waUrl, "_blank");
-    toast({ title: "Abrindo WhatsApp Web", description: "Seu convite será colado na conversa." });
+    toast({ title: isMobile ? "Abrindo WhatsApp" : "Abrindo WhatsApp Web", description: "Seu convite será colado na conversa." });
   };
 
+  const handleCopyAddress = async () => {
+    const addr = event?.location_text?.trim();
+    if (!addr) {
+      toast({ title: "Endereço não disponível", description: "Esse rolê ainda não tem endereço definido." });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(addr);
+      toast({ title: "Endereço copiado!", description: "O endereço foi copiado para a área de transferência." });
+      // Interação: prioriza este rolê na Home
+      try {
+        const eid = String(id ?? "");
+        if (eid) {
+          localStorage.setItem("pinned_event_id", eid);
+          if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+            const bc = new BroadcastChannel("home-bump");
+            bc.postMessage({ eventId: eid });
+            bc.close();
+          }
+        }
+      } catch {}
+    } catch {
+      toast({ title: "Não foi possível copiar", description: "Tente novamente mais tarde." });
+    }
+  };
+
+  // Edição de data/horário
+  const isCreator = !!profile?.id && !!event?.created_by && profile.id === event.created_by;
+  const isAdmin = !!permissions?.canAccessAdmin;
+  const canEditTimeOnly = isCreator && !isAdmin;
+  const canEditDateTime = isAdmin;
+  const [editOpen, setEditOpen] = useState(false);
+  const [newDate, setNewDate] = useState<string>("");
+  const [newTime, setNewTime] = useState<string>("");
+  const [savingEvent, setSavingEvent] = useState(false);
+
+  useEffect(() => {
+    if (event?.event_timestamp) {
+      const d = new Date(event.event_timestamp);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      const hh = String(d.getHours()).padStart(2, "0");
+      const min = String(d.getMinutes()).padStart(2, "0");
+      setNewDate(`${yyyy}-${mm}-${dd}`);
+      setNewTime(`${hh}:${min}`);
+    }
+  }, [event?.event_timestamp]);
+
+  const handleSaveEventDateTime = async () => {
+    if (!id || !event) return;
+    try {
+      setSavingEvent(true);
+      const base = event.event_timestamp ? new Date(event.event_timestamp) : new Date();
+      let year = base.getFullYear();
+      let month = base.getMonth(); // 0-based
+      let day = base.getDate();
+      if (canEditDateTime && newDate) {
+        const [y, m, d] = newDate.split("-").map((s) => parseInt(s, 10));
+        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+          year = y;
+          month = m - 1;
+          day = d;
+        }
+      }
+      let hours = base.getHours();
+      let minutes = base.getMinutes();
+      if (newTime) {
+        const [h, mi] = newTime.split(":").map((s) => parseInt(s, 10));
+        if (!isNaN(h) && !isNaN(mi)) {
+          hours = h;
+          minutes = mi;
+        }
+      }
+      const updated = new Date(year, month, day, hours, minutes, 0, 0);
+      const iso = updated.toISOString();
+      const { error } = await supabase
+        .from("events")
+        .update({ event_timestamp: iso })
+        .eq("id", Number(id));
+      if (error) throw error;
+      setEvent((prev) => (prev ? { ...prev, event_timestamp: iso } : prev));
+      toast({ title: "Rolê atualizado", description: canEditDateTime ? "Data e horário atualizados." : "Horário atualizado." });
+      setEditOpen(false);
+    } catch (e: any) {
+      toast({ title: "Erro ao salvar", description: e?.message ?? String(e), variant: "destructive" });
+    } finally {
+      setSavingEvent(false);
+    }
+  };
+
+  // Garantir que ao navegar para um novo rolê a página vá ao topo
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [id]);
+
+  
+
+  const confirmCheckin = async () => {
+    if (!profile?.id || !id || !event?.event_timestamp) return;
+    try {
+      // Marca check-in no evento atual
+      const nowIso = new Date().toISOString();
+      const { error: upErr } = await supabase
+        .from("event_rsvps")
+        .upsert({
+          event_id: Number(id),
+          user_id: profile.id,
+          status: "going",
+          checkin_confirmed: true,
+          checkin_at: nowIso,
+        }, { onConflict: "event_id,user_id" });
+      if (upErr) throw upErr;
+
+      // Remove compromissos 'VOU' no mesmo dia (mantendo apenas este)
+      const d = new Date(event.event_timestamp);
+      const start = new Date(d); start.setHours(0,0,0,0);
+      const end = new Date(d); end.setHours(23,59,59,999);
+      const { data: dayEvents, error: dayErr } = await supabase
+        .from("events")
+        .select("id,event_timestamp")
+        .gte("event_timestamp", start.toISOString())
+        .lt("event_timestamp", end.toISOString())
+        .neq("id", Number(id));
+      if (dayErr) throw dayErr;
+      const otherIds = (dayEvents ?? []).map((e: any) => e.id);
+      if (otherIds.length > 0) {
+        const { error: updErr } = await supabase
+          .from("event_rsvps")
+          .update({ status: "not-going" })
+          .in("event_id", otherIds)
+          .eq("user_id", profile.id)
+          .eq("status", "going");
+        if (updErr) throw updErr;
+      }
+
+      setCheckinConfirmed(true);
+      setRsvpStatus("going");
+      // Marca este rolê como fixado para reordenar na Home e notifica via BroadcastChannel
+      try {
+        const eid = String(id);
+        localStorage.setItem("pinned_event_id", eid);
+        const bc = new BroadcastChannel("home-bump");
+        bc.postMessage({ eventId: eid });
+        bc.close();
+      } catch {}
+      toast({ title: "Check-in confirmado", description: "Compromissos no mesmo dia foram ajustados automaticamente." });
+      setCheckinDialogOpen(false);
+      // Navega para a Home para refletir imediatamente na lista
+      try { navigate("/"); } catch {}
+      // Atualiza a lista de participantes após confirmar check-in
+      loadParticipants();
+    } catch (e: any) {
+      toast({ title: "Falha no check-in", description: e?.message ?? String(e), variant: "destructive" });
+    }
+  };
+  useEffect(() => {
+    const fetchSameDay = async () => {
+      if (!event?.event_timestamp || !event?.id) {
+        setSameDayEvents([]);
+        return;
+      }
+      try {
+        setLoadingSameDay(true);
+        const d = new Date(event.event_timestamp);
+        const start = new Date(d);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(d);
+        end.setHours(23, 59, 59, 999);
+
+        const { data, error } = await supabase
+          .from("events")
+          .select("id,title,description,cover_image_url,event_timestamp,location_text")
+          .gte("event_timestamp", start.toISOString())
+          .lt("event_timestamp", end.toISOString())
+          .neq("id", Number(event.id))
+          .limit(8);
+        if (error) throw error;
+        setSameDayEvents((data as EventRow[]) ?? []);
+      } catch (e: any) {
+        console.error("Erro ao carregar rolês do mesmo dia:", e?.message ?? e);
+      } finally {
+        setLoadingSameDay(false);
+      }
+    };
+    fetchSameDay();
+  }, [event?.event_timestamp, event?.id]);
+
+  // Estados visíveis para evitar tela preta
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="text-white/90">Carregando rolê...</div>
+      </div>
+    );
+  }
+  if (!loading && !event) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="text-center space-y-3">
+          <div className="text-white text-xl font-semibold">Evento não encontrado</div>
+          <Link to="/" className="inline-block rounded-md px-4 py-2 bg-white/10 text-white hover:bg-white/20">Voltar para Home</Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen pb-20 pt-14">
+    <div className={`min-h-screen pb-20 pt-14 ${isCheckinWindow ? "border-2 border-emerald-500/60 rounded-xl" : ""}`}> 
       <Button
         variant="ghost"
         size="icon"
@@ -87,13 +474,13 @@ const EventDetails = () => {
 
       <div className="relative h-64 overflow-hidden">
         <img
-          src={event.coverImage}
-          alt={event.title}
+          src={event?.cover_image_url ?? "/placeholder.svg"}
+          alt={event?.title ?? "Rolê"}
           className="w-full h-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
         <h1 className="absolute bottom-4 left-4 right-4 text-2xl font-bold text-foreground">
-          {event.title}
+          {event?.title ?? "Rolê"}
         </h1>
       </div>
 
@@ -105,199 +492,319 @@ const EventDetails = () => {
           >
             Detalhes
           </TabsTrigger>
-          <TabsTrigger
-            value="chat"
-            className="flex-1 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-          >
-            Chat
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="details" className="px-4 space-y-6 pb-6">
           {/* When and Where */}
-          <Card className="p-4 space-y-3 bg-card border-border">
+          <Card className={`p-4 space-y-3 bg-card ${isCheckinWindow ? "border-emerald-500/60" : "border-border"}`}>
             <h3 className="font-semibold text-foreground">Quando e Onde</h3>
             <div className="space-y-2 text-sm">
               <div className="flex items-start gap-3">
                 <Calendar className="h-5 w-5 text-primary mt-0.5" />
-                <div>
-                  <div className="font-medium text-foreground">{event.date}</div>
-                  <div className="text-muted-foreground">{event.time}</div>
+                <div className="flex-1">
+                  <div className="font-medium text-foreground capitalize">{dateStr}</div>
+                  <div className="text-muted-foreground">{timeStr}</div>
                 </div>
+                {(canEditTimeOnly || canEditDateTime) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto"
+                    onClick={() => setEditOpen(true)}
+                  >
+                    {canEditDateTime ? "Editar data e horário" : "Editar horário"}
+                  </Button>
+                )}
               </div>
               <div className="flex items-start gap-3">
                 <MapPin className="h-5 w-5 text-primary mt-0.5" />
-                <div className="flex-1">
-                  <div className="font-medium text-foreground">{event.location}</div>
-                  <Button variant="link" className="h-auto p-0 text-primary">
-                    Ver no mapa <ExternalLink className="h-3 w-3 ml-1" />
+                <div className="flex-1 flex items-center justify-between gap-2">
+                  <div className="font-medium text-foreground flex-1">{event?.location_text ?? "Local a definir"}</div>
+                  <Button
+                    variant="link"
+                    size="icon"
+                    className="h-6 w-6 p-0 text-primary"
+                    onClick={handleCopyAddress}
+                    aria-label="Copiar endereço"
+                    title="Copiar endereço"
+                  >
+                    <Copy className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
             </div>
+            {(canEditTimeOnly || canEditDateTime) && (
+              <Dialog open={editOpen} onOpenChange={setEditOpen}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>{canEditDateTime ? "Editar data e horário" : "Editar horário"}</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    {canEditDateTime && (
+                      <div className="space-y-2">
+                        <Label>Data</Label>
+                        <Input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label>Horário</Label>
+                      <Input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} />
+                    </div>
+                    {canEditTimeOnly && (
+                      <p className="text-xs text-muted-foreground">Apenas o criador do rolê pode alterar o horário. A data permanece a mesma.</p>
+                    )}
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setEditOpen(false)}>Cancelar</Button>
+                    <Button onClick={handleSaveEventDateTime} disabled={savingEvent}>
+                      {savingEvent ? "Salvando..." : "Salvar"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            )}
           </Card>
 
           {/* Description */}
           <div className="space-y-2">
             <h3 className="font-semibold text-foreground">Descrição</h3>
             <p className="text-muted-foreground leading-relaxed">
-              {event.description}
+              {event?.description ?? "Sem descrição."}
             </p>
           </div>
 
-          {/* Invite / Share */}
-          <Card className="p-4 bg-card border-border">
-            <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-              <div className="text-sm text-muted-foreground">
-                Gere um convite com link e informações do rolê.
-              </div>
-              <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-                <DialogTrigger asChild>
+          
+
+          {/* RSVP / Check-in */}
+          {isCheckinWindow ? (
+            <div className="space-y-3">
+              <h3 className="font-semibold text-foreground">Check-in</h3>
+              <Card className="p-3 bg-card border-emerald-500/40">
+                <div className="flex gap-3">
+                  <Button
+                    onClick={() => {
+                      if (!permissions.canConfirmPresence || checkinConfirmed) return;
+                      setCheckinDialogOpen(true);
+                    }}
+                    disabled={!permissions.canConfirmPresence || checkinConfirmed}
+                    className="h-10"
+                  >
+                    {checkinConfirmed ? "Check-in confirmado" : "Confirmar"}
+                  </Button>
                   <Button
                     variant="outline"
-                    className="w-full sm:w-auto h-10 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
+                    className="h-10"
+                    disabled={!permissions.canConfirmPresence}
+                    onClick={async () => {
+                      try {
+                        if (!profile?.id || !id) return;
+                        const { error } = await supabase
+                          .from("event_rsvps")
+                          .upsert({
+                            event_id: Number(id),
+                            user_id: profile.id,
+                            status: "not-going",
+                            checkin_confirmed: false,
+                            checkin_at: null,
+                          }, { onConflict: "event_id,user_id" });
+                        if (error) throw error;
+                        setCheckinConfirmed(false);
+                        setCheckinDialogOpen(false);
+                        setRsvpStatus("not-going");
+                        toast({ title: "Presença atualizada", description: "Você marcou que não vai." });
+                        loadParticipants();
+                      } catch (e: any) {
+                        toast({ title: "Erro ao atualizar presença", description: e?.message ?? String(e), variant: "destructive" });
+                      }
+                    }}
                   >
-                    <Share2 className="h-4 w-4 mr-2" /> Convidar no WhatsApp
+                    Não vou
                   </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Convite do rolê</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-3">
-                    <Textarea
-                      value={inviteMessage}
-                      onChange={(e) => setInviteMessage(e.target.value)}
-                      placeholder="Digite a mensagem do convite"
-                      className="min-h-[100px]"
-                    />
-                    <div className="text-xs text-muted-foreground">
-                      Ao copiar, enviaremos o link junto com a mensagem acima.
+                </div>
+                {/* Modal de confirmação central */}
+                <Dialog open={checkinDialogOpen} onOpenChange={setCheckinDialogOpen}>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Confirmar check-in</DialogTitle>
+                    </DialogHeader>
+                    <div className="text-sm text-muted-foreground">
+                      Dentro de 48h do rolê, confirme presença para garantir sua vaga.
+                      Ao confirmar, compromissos marcados como "VOU" no mesmo dia serão removidos automaticamente, mantendo apenas este.
                     </div>
-                  </div>
-                  <DialogFooter className="gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={handleCopyInvite}
-                    >
-                      Copiar link
-                    </Button>
-                    <Button onClick={handleOpenWhatsApp}>
-                      Abrir WhatsApp Web
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setCheckinDialogOpen(false)}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        onClick={async () => {
+                          await confirmCheckin();
+                          setCheckinDialogOpen(false);
+                        }}
+                        disabled={!permissions.canConfirmPresence || checkinConfirmed}
+                      >
+                        Confirmar
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </Card>
             </div>
-          </Card>
+          ) : (
+            <div className="space-y-3">
+              <h3 className="font-semibold text-foreground">Você vai?</h3>
+              <div className="grid grid-cols-3 gap-3">
+                <Button
+                  variant={rsvpStatus === "going" ? "rsvpActive" : "rsvp"}
+                  onClick={() => handleUpdateRsvp("going")}
+                  className="h-12 font-semibold"
+                  disabled={!permissions.canConfirmPresence}
+                >
+                  VOU
+                </Button>
+                <Button
+                  variant={rsvpStatus === "maybe" ? "rsvpActive" : "rsvp"}
+                  onClick={() => handleUpdateRsvp("maybe")}
+                  className="h-12 font-semibold"
+                  disabled={!permissions.canConfirmPresence}
+                >
+                  TALVEZ
+                </Button>
+                <Button
+                  variant={rsvpStatus === "not-going" ? "rsvpActive" : "rsvp"}
+                  onClick={() => handleUpdateRsvp("not-going")}
+                  className="h-12 font-semibold"
+                  disabled={!permissions.canConfirmPresence}
+                >
+                  NÃO VOU
+                </Button>
+              </div>
+            </div>
+          )}
 
-          {/* RSVP Buttons */}
+          {/* Participantes */}
           <div className="space-y-3">
-            <h3 className="font-semibold text-foreground">Você vai?</h3>
-            <div className="grid grid-cols-3 gap-3">
-              <Button
-                variant={rsvpStatus === "going" ? "rsvpActive" : "rsvp"}
-                onClick={() => {
-                  if (!permissions.canConfirmPresence) {
-                    toast({
-                      title: "Ação não permitida",
-                      description: flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre com sua conta e aguarde aprovação.",
-                    });
-                    return;
-                  }
-                  setRsvpStatus("going");
-                }}
-                className="h-12 font-semibold"
-                disabled={!permissions.canConfirmPresence}
-              >
-                VOU
-              </Button>
-              <Button
-                variant={rsvpStatus === "maybe" ? "rsvpActive" : "rsvp"}
-                onClick={() => {
-                  if (!permissions.canConfirmPresence) {
-                    toast({
-                      title: "Ação não permitida",
-                      description: flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre com sua conta e aguarde aprovação.",
-                    });
-                    return;
-                  }
-                  setRsvpStatus("maybe");
-                }}
-                className="h-12 font-semibold"
-                disabled={!permissions.canConfirmPresence}
-              >
-                TALVEZ
-              </Button>
-              <Button
-                variant={rsvpStatus === "not-going" ? "rsvpActive" : "rsvp"}
-                onClick={() => {
-                  if (!permissions.canConfirmPresence) {
-                    toast({
-                      title: "Ação não permitida",
-                      description: flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre com sua conta e aguarde aprovação.",
-                    });
-                    return;
-                  }
-                  setRsvpStatus("not-going");
-                }}
-                className="h-12 font-semibold"
-                disabled={!permissions.canConfirmPresence}
-              >
-                NÃO VOU
-              </Button>
-            </div>
+            <h3 className="font-semibold text-foreground">Participantes</h3>
+            {participantsLoading && (
+              <div className="text-sm text-muted-foreground">Carregando participantes...</div>
+            )}
+            {!participantsLoading && participants.length === 0 && (
+              <div className="text-center text-muted-foreground py-6">Ainda ninguém confirmou presença.</div>
+            )}
+            {!participantsLoading && participants.length > 0 && (
+              <div className="flex flex-wrap gap-4">
+                {participants.map((p) => {
+                  const name = p.full_name || formatPhoneBR(p.phone_number || "");
+                  const initials = (name || "?").slice(0, 2).toUpperCase();
+                  const ringClass =
+                    p.status === "going"
+                      ? "ring-[3px] ring-emerald-400/60"
+                      : p.status === "maybe"
+                      ? "ring-[3px] ring-amber-400/60"
+                      : "ring-[3px] ring-rose-400/60";
+                  return (
+                    <div key={`${p.user_id}-${p.status}`} className="flex items-center gap-2">
+                      <Avatar className={`h-10 w-10 ${ringClass}`}>
+                        {p.avatar_url ? (
+                          <AvatarImage src={p.avatar_url} alt={name} />
+                        ) : (
+                          <AvatarImage src={undefined} alt={name} />
+                        )}
+                        <AvatarFallback className="text-xs bg-white/10 text-foreground">
+                          {initials}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="text-xs text-muted-foreground">{name}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="text-xs text-muted-foreground">Verde: VOU • Amarelo: TALVEZ • Vermelho: NÃO VOU</div>
           </div>
 
-          {/* Attendance Lists */}
-          <div className="space-y-4">
-            <div>
-              <h3 className="font-semibold text-foreground mb-3">
-                Confirmados ({event.going.length})
-              </h3>
-              <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
-                {event.going.map((person, index) => (
-                  <div key={index} className="flex flex-col items-center gap-2 min-w-[64px]">
-                    <Avatar className="h-16 w-16 border-2 border-primary">
-                      <AvatarImage src={person.avatar} />
-                      <AvatarFallback className="bg-primary text-primary-foreground">
-                        {person.name.charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="text-xs text-center text-muted-foreground line-clamp-2 w-full">
-                      {person.name.split(" ")[0]}
-                    </span>
-                  </div>
-                ))}
+          {/* Suggested same-day events */}
+          {loadingSameDay && (
+            <div className="text-xs text-muted-foreground">Carregando sugestões do mesmo dia...</div>
+          )}
+          {sameDayEvents.length > 0 && (
+            <div className="space-y-2 pt-2">
+              <h3 className="font-semibold text-foreground">ROLÊS SUGERIDOS PARA O MESMO DIA</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {sameDayEvents.map((ev) => {
+                  const ts = ev.event_timestamp ? new Date(ev.event_timestamp) : null;
+                  const tStr = ts ? ts.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
+                  return (
+                    <Link to={`/evento/${ev.id}`} key={ev.id}>
+                      <Card className="flex items-center gap-3 p-2 hover:border-primary/50 transition-colors">
+                        <img
+                          src={ev.cover_image_url ?? "/placeholder.svg"}
+                          alt={ev.title}
+                          className="h-16 w-24 object-cover rounded-md"
+                        />
+                        <div className="flex-1">
+                          <div className="text-sm font-medium text-foreground line-clamp-2">{ev.title}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {tStr} {ev.location_text ? `• ${ev.location_text}` : ""}
+                          </div>
+                        </div>
+                      </Card>
+                    </Link>
+                  );
+                })}
               </div>
             </div>
-
-            <div>
-              <h3 className="font-semibold text-foreground mb-3">
-                Talvez ({event.maybe.length})
-              </h3>
-              <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
-                {event.maybe.map((person, index) => (
-                  <div key={index} className="flex flex-col items-center gap-2 min-w-[64px]">
-                    <Avatar className="h-16 w-16 border-2 border-muted">
-                      <AvatarImage src={person.avatar} />
-                      <AvatarFallback className="bg-muted text-foreground">
-                        {person.name.charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="text-xs text-center text-muted-foreground line-clamp-2 w-full">
-                      {person.name.split(" ")[0]}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          )}
+          {!loadingSameDay && sameDayEvents.length === 0 && (
+            <div className="flex items-center justify-between gap-3 pt-2">
+              <div className="text-xs text-muted-foreground">Ainda não tem outros rolês nessa mesma data.</div>
+              <Link to="/criar">
+                <Button variant="outline" size="sm" className="h-8 px-3">Criar</Button>
+              </Link>
             </div>
-          </div>
-        </TabsContent>
+          )}
 
-        <TabsContent value="chat" className="px-4 space-y-4">
-          <div className="text-center text-muted-foreground py-8">
-            Chat do evento em breve...
+          {/* Invite / Share - último elemento (apenas botão) */}
+          <div className="flex items-center justify-start">
+            <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="h-10 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
+                >
+                  <Share2 className="h-4 w-4 mr-2" /> Convidar no WhatsApp
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+              <DialogHeader>
+                  <DialogTitle>Convite do rolê {isCheckinWindow ? "(Check-in)" : "(Normal)"}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <Textarea
+                  value={inviteMessage}
+                  onChange={(e) => setInviteMessage(e.target.value)}
+                  placeholder="Digite a mensagem do convite"
+                  className="min-h-[100px]"
+                />
+                <div className="text-xs text-muted-foreground">
+                    A mensagem muda conforme o modo do evento. O link (olink) permanece o mesmo.
+                </div>
+              </div>
+                <DialogFooter className="gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleCopyInvite}
+                  >
+                    Copiar link
+                  </Button>
+                  <Button onClick={handleOpenWhatsApp}>
+                    Abrir WhatsApp Web
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </TabsContent>
       </Tabs>

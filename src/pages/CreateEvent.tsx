@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ArrowLeft, Upload, Calendar as CalendarIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Upload, Calendar as CalendarIcon, Clock as ClockIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,22 +7,58 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { supabase } from "@/lib/supabase";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthRole } from "@/hooks/useAuthRole";
-import LocationPickerLeaflet, { LatLng } from "../components/events/LocationPickerLeaflet";
+import { supabase } from "@/lib/supabase";
 
 const CreateEvent = () => {
   const navigate = useNavigate();
   const [coverImage, setCoverImage] = useState<string | null>(null);
+  const [eventName, setEventName] = useState("");
   const [locationName, setLocationName] = useState("");
-  const [mapLocation, setMapLocation] = useState<LatLng | null>(null);
+  const [instagramUrl, setInstagramUrl] = useState("");
   const [limitEnabled, setLimitEnabled] = useState(false);
   const [minParticipants, setMinParticipants] = useState<number | "">("");
   const [maxParticipants, setMaxParticipants] = useState<number | "">("");
-  const [eventStatus, setEventStatus] = useState<"confirmado" | "sugestao">("confirmado");
+  // Removido: status do rolê não será mais usado na UI
   const { toast } = useToast();
   const { permissions, flags, profile } = useAuthRole();
+  const [venues, setVenues] = useState<Array<{ id: string; name: string; address_text: string | null; instagram_url: string | null }>>([]);
+  const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
+  const [showNewVenue, setShowNewVenue] = useState(false);
+  const [newVenueName, setNewVenueName] = useState("");
+  const [newVenueAddress, setNewVenueAddress] = useState("");
+  const [newVenueInstagram, setNewVenueInstagram] = useState("");
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedHour, setSelectedHour] = useState<string | null>(null);
+  const [selectedMinute, setSelectedMinute] = useState<string | null>(null);
+  const selectedTimeStr = useMemo(() => (selectedHour && selectedMinute ? `${selectedHour}:${selectedMinute}` : ""), [selectedHour, selectedMinute]);
+
+  useEffect(() => {
+    const loadVenues = async () => {
+      const { data, error } = await supabase
+        .from("venues")
+        .select("id,name,address_text,instagram_url")
+        .order("name", { ascending: true });
+      if (error) {
+        // Apenas notifica, não bloqueia o fluxo
+        toast({ title: "Falha ao carregar rolês salvos", description: error.message });
+        return;
+      }
+      setVenues(data ?? []);
+    };
+    loadVenues();
+  }, []);
+
+  const filteredVenues = useMemo(() => {
+    const q = eventName.trim().toLowerCase();
+    if (!q) return [];
+    return venues.filter((v) => v.name.toLowerCase().includes(q)).slice(0, 5);
+  }, [eventName, venues]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -58,7 +94,6 @@ const CreateEvent = () => {
         }
         const form = e.currentTarget as HTMLFormElement;
         const formData = new FormData(form);
-        const name = formData.get("name") as string | null;
         const description = formData.get("description") as string | null;
         const date = formData.get("date") as string | null;
         const time = formData.get("time") as string | null;
@@ -83,30 +118,31 @@ const CreateEvent = () => {
           eventTimestamp = iso;
         }
 
+        // Validação simples
+        if (!eventName) {
+          toast({ title: "Informe o nome do rolê", description: "O título é obrigatório." });
+          return;
+        }
+
         // Mapeia para colunas reais da tabela public.events
-        const payload = {
-          title: name,
+        const payload: Record<string, any> = {
+          title: eventName,
           description,
           cover_image_url: coverImage ?? null,
           event_timestamp: eventTimestamp,
           location_text: locationName || null,
-          latitude: mapLocation?.lat ?? null,
-          longitude: mapLocation?.lng ?? null,
+          instagram_url: instagramUrl || null,
+          venue_id: selectedVenueId || null,
           created_by: profile?.id ?? null,
         };
-      
-        if (!supabase) {
-          toast({ title: "Supabase não configurado", description: "Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY." });
-          return;
-        }
-      
+
         const { error } = await supabase.from("events").insert(payload);
         if (error) {
           toast({ title: "Erro ao salvar", description: error.message });
           return;
         }
-      
-        toast({ title: "Evento criado!", description: "Seu rolê foi publicado." });
+
+        toast({ title: "Evento criado", description: "Seu rolê foi salvo e aparecerá na Home." });
         navigate("/");
       }}>
         {/* Cover Image */}
@@ -139,15 +175,145 @@ const CreateEvent = () => {
           </Card>
         </div>
 
-        {/* Event Name */}
-        <div className="space-y-2">
-          <Label htmlFor="name" className="text-white">Nome do Rolê</Label>
-          <Input
-            id="name"
-            name="name"
-            placeholder="Ex: Churrasco na Laje do Zé"
-            className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
-          />
+        {/* Nome do Rolê com sugestões e campos acima */}
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="name" className="text-white">Nome do Rolê</Label>
+            <div className="relative">
+              <Input
+                id="name"
+                placeholder="Ex: BLITZ HOUZ, Churrasco na Laje do Zé"
+                className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
+                value={eventName}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setEventName(val);
+                  if (selectedVenueId) {
+                    const sel = venues.find((v) => v.id === selectedVenueId);
+                    if (sel && val.trim() !== (sel.name ?? "")) {
+                      setSelectedVenueId(null);
+                    }
+                  }
+                }}
+              />
+              {filteredVenues.length > 0 && !selectedVenueId && eventName.trim().length > 0 && (
+                <div className="absolute z-20 mt-1 w-full rounded-md border border-white/20 bg-black/90 backdrop-blur-sm">
+                  {filteredVenues.map((v) => (
+                    <button
+                      type="button"
+                      key={v.id}
+                      className="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/10"
+                      onClick={() => {
+                        setSelectedVenueId(v.id);
+                        setEventName(v.name);
+                        setLocationName(v.address_text ?? "");
+                        setInstagramUrl(v.instagram_url ?? "");
+                        setShowNewVenue(false);
+                      }}
+                    >
+                      {v.name}
+                    </button>
+                  ))}
+                  <div className="h-px bg-white/10" />
+                  <div className="px-3 py-2">
+                    <button
+                      type="button"
+                      className="w-full text-left text-xs text-white/80 hover:bg-white/10 px-2 py-2 rounded"
+                      onClick={() => {
+                        setShowNewVenue(true);
+                        setNewVenueName(eventName.trim());
+                      }}
+                    >
+                      Cadastrar novo rolê com este nome
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          {/* Card somente leitura com informações do rolê selecionado */}
+          {selectedVenueId && (() => {
+            const v = venues.find((vv) => vv.id === selectedVenueId);
+            if (!v) return null;
+            return (
+              <div className="mt-3 rounded-md border border-white/20 bg-black/70 p-3 text-sm">
+                <div className="text-white/90 font-medium">Rolê selecionado</div>
+                <div className="mt-1 text-white/80">Nome: {v.name}</div>
+                {v.address_text && (
+                  <div className="mt-1 text-white/80">Endereço: {v.address_text}</div>
+                )}
+                {v.instagram_url && (
+                  <div className="mt-1 text-white/80">
+                    Instagram / Site: {v.instagram_url.startsWith("http") ? (
+                      <a href={v.instagram_url} target="_blank" rel="noreferrer" className="underline">{v.instagram_url}</a>
+                    ) : (
+                      v.instagram_url
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          {/* Botão fixo abaixo do Nome para cadastrar novo rolê */}
+          <div className="mt-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 px-3 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
+              onClick={() => {
+                setShowNewVenue(true);
+                setNewVenueName(eventName.trim());
+              }}
+            >
+              Cadastrar novo rolê
+            </Button>
+          </div>
+          {showNewVenue && (
+            <div className="mt-2 space-y-2">
+              <Input id="inline-new-venue-name-below" value={newVenueName} onChange={(e) => setNewVenueName(e.target.value)} className="bg-white/10 border-white/20 text-white placeholder:text-white/60" placeholder="Nome do rolê" />
+              <Input id="inline-new-venue-address-below" value={newVenueAddress} onChange={(e) => setNewVenueAddress(e.target.value)} className="bg-white/10 border-white/20 text-white placeholder:text-white/60" placeholder="Endereço" />
+              <Input id="inline-new-venue-instagram-below" value={newVenueInstagram} onChange={(e) => setNewVenueInstagram(e.target.value)} className="bg-white/10 border-white/20 text-white placeholder:text-white/60" placeholder="Instagram / Site" />
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-white/30 text-white hover:bg-white/10"
+                  onClick={async () => {
+                    if (!newVenueName.trim()) {
+                      toast({ title: "Informe o nome do rolê", description: "Campo nome é obrigatório." });
+                      return;
+                    }
+                    const { data, error } = await supabase
+                      .from("venues")
+                      .insert({ name: newVenueName.trim(), address_text: newVenueAddress.trim() || null, instagram_url: newVenueInstagram.trim() || null, created_by: profile?.id ?? null })
+                      .select("id,name,address_text,instagram_url")
+                      .maybeSingle();
+                    if (error) {
+                      toast({ title: "Erro ao cadastrar rolê", description: error.message });
+                      return;
+                    }
+                    if (data) {
+                      setVenues((prev) => [...prev, data]);
+                      setSelectedVenueId(data.id);
+                      setEventName(data.name);
+                      setLocationName(data.address_text ?? "");
+                      setInstagramUrl(data.instagram_url ?? "");
+                      setShowNewVenue(false);
+                      setNewVenueName("");
+                      setNewVenueAddress("");
+                      setNewVenueInstagram("");
+                      toast({ title: "Rolê cadastrado", description: "Dados aplicados ao formulário." });
+                    }
+                  }}
+                >
+                  Salvar novo rolê
+                </Button>
+                <Button type="button" variant="ghost" className="text-white/80" onClick={() => setShowNewVenue(false)}>Cancelar</Button>
+              </div>
+            </div>
+          )}
+          {/* Campos de Endereço/Site serão definidos ao selecionar uma sugestão ou ao cadastrar um novo rolê via painel inline acima. */}
+          {/* Formulário inline de novo rolê agora aparece dentro do painel de sugestões acima. */}
         </div>
 
         {/* Description */}
@@ -162,14 +328,85 @@ const CreateEvent = () => {
         </div>
 
         {/* Date and Time */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="date" className="text-white">Data</Label>
-            <Input id="date" name="date" type="date" className="bg-white/10 border-white/20 text-white placeholder:text-white/60" />
+            {/* Input oculto para enviar a data em yyyy-MM-dd via FormData */}
+            <input type="hidden" name="date" value={selectedDate ? format(selectedDate, "yyyy-MM-dd") : ""} />
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-start bg-white/10 border-white/20 text-white hover:bg-white/10"
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {selectedDate ? format(selectedDate, "dd/MM/yyyy", { locale: ptBR }) : "Selecione a data"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full sm:w-auto max-w-[calc(100vw-2rem)] p-0 bg-black/90 border-white/20">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate ?? undefined}
+                  onSelect={(date) => setSelectedDate(date ?? null)}
+                  locale={ptBR}
+                  className="text-white"
+                />
+              </PopoverContent>
+            </Popover>
           </div>
           <div className="space-y-2">
             <Label htmlFor="time" className="text-white">Horário</Label>
-            <Input id="time" name="time" type="time" className="bg-white/10 border-white/20 text-white placeholder:text-white/60" />
+            {/* Input oculto para enviar o horário em HH:mm via FormData */}
+            <input type="hidden" name="time" value={selectedTimeStr} />
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-start bg-white/10 border-white/20 text-white hover:bg-white/10"
+                >
+                  <ClockIcon className="mr-2 h-4 w-4" />
+                  {selectedTimeStr ? selectedTimeStr : "Selecione o horário"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full sm:w-[260px] max-w-[calc(100vw-2rem)] bg-black/90 border-white/20">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-white/80">Hora</Label>
+                    <Select value={selectedHour ?? undefined} onValueChange={(v) => setSelectedHour(v)}>
+                      <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
+                        <SelectValue placeholder="HH" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 24 }).map((_, i) => {
+                          const hh = String(i).padStart(2, "0");
+                          return (
+                            <SelectItem key={hh} value={hh}>{hh}</SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-white/80">Minuto</Label>
+                    <Select value={selectedMinute ?? undefined} onValueChange={(v) => setSelectedMinute(v)}>
+                      <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
+                        <SelectValue placeholder="MM" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[0, 15, 30, 45].map((i) => {
+                          const mm = String(i).padStart(2, "0");
+                          return (
+                            <SelectItem key={mm} value={mm}>{mm}</SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
 
@@ -177,35 +414,21 @@ const CreateEvent = () => {
           <div className="p-4 space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">Detalhes do Rolê</h2>
-              <span className="text-xs text-white/60">Defina status, limites e localização</span>
-            </div>
-
-            {/* Status do Rolê */}
-            <div className="space-y-2">
-              <Label htmlFor="status" className="text-white">Status do Rolê</Label>
-              <Select value={eventStatus} onValueChange={(v) => setEventStatus(v as "confirmado" | "sugestao") }>
-                <SelectTrigger id="status" className="bg-white/10 border-white/20 text-white hover:bg-white/10 focus:ring-2 focus:ring-emerald-500">
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="confirmado">Confirmado</SelectItem>
-                  <SelectItem value="sugestao">Sugestão</SelectItem>
-                </SelectContent>
-              </Select>
+              <span className="text-xs text-white/60">Defina limites e localização</span>
             </div>
 
             <div className="h-px bg-white/10" />
 
             {/* Limite de pessoas */}
             <div className="space-y-2">
-              <Label htmlFor="limit" className="text-white">Limite de pessoas</Label>
-              <Select defaultValue="não" onValueChange={(v) => setLimitEnabled(v === "sim") }>
+              <Label htmlFor="limit" className="text-white">Qual máximo de pessoas podem ir?</Label>
+              <Select defaultValue="Sem limite" onValueChange={(v) => setLimitEnabled(v === "Com limite") }>
                 <SelectTrigger id="limit" className="bg-white/10 border-white/20 text-white hover:bg-white/10 focus:ring-2 focus:ring-emerald-500">
                   <SelectValue placeholder="Selecione" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="não">Não</SelectItem>
-                  <SelectItem value="sim">Sim</SelectItem>
+                  <SelectItem value="Sem limite">Sem limite</SelectItem>
+                  <SelectItem value="Com limite">Com limite</SelectItem>
                 </SelectContent>
               </Select>
               {limitEnabled && (
@@ -238,47 +461,13 @@ const CreateEvent = () => {
                       className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
                     />
                   </div>
-                </div>
-              )}
             </div>
+          )}
+        </div>
 
             <div className="h-px bg-white/10" />
 
-            {/* Local e mapa (mapa por último) */}
-            <div className="space-y-2">
-              <label htmlFor="location" className="text-sm font-medium text-white">Local</label>
-              <input
-                id="location"
-                type="text"
-                value={locationName}
-                onChange={(e) => setLocationName(e.target.value)}
-                placeholder="Digite o nome do local, bairro ou referência"
-                className="rounded-md bg-white/10 border border-white/20 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-
-              {/* Instagram / Site */}
-              <div className="space-y-2 mt-3">
-                <Label htmlFor="instagram" className="text-white">Instagram / Site</Label>
-                <Input
-                  id="instagram"
-                  name="instagram"
-                  type="url"
-                  placeholder="Cole o link do Instagram, site etc."
-                  className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
-                />
-              </div>
-
-              <div className="mt-3">
-                <LocationPickerLeaflet
-                  value={mapLocation}
-                  onChange={(coords, addr) => {
-                    setMapLocation(coords);
-                    if (addr && !locationName) setLocationName(addr);
-                  }}
-                  name="location_coords"
-                />
-              </div>
-            </div>
+            {/* Campos de Local/Instagram removidos desta seção para evitar redundância */}
           </div>
         </Card>
 

@@ -6,11 +6,12 @@ import { useAuthRole } from "@/hooks/useAuthRole";
 type NavItem = { icon: any; label: string; path: string; isSpecial?: boolean };
 
 export const BottomNav = () => {
-  const { flags, permissions } = useAuthRole();
+  const { flags } = useAuthRole();
   const navItems: NavItem[] = [
     { icon: Calendar, label: "Rolês", path: "/" },
-    { icon: BarChart3, label: "Enquetes", path: permissions.canCreatePolls ? "/enquetes" : "/auth" },
-    { icon: PlusCircle, label: "Criar", path: permissions.canCreateEvents ? "/criar" : "/auth", isSpecial: true },
+    // Mantém rotas reais e delega controle ao RouteGuard
+    { icon: BarChart3, label: "Enquetes", path: "/enquetes" },
+    { icon: PlusCircle, label: "Criar", path: "/criar", isSpecial: true },
     { icon: Camera, label: "Memórias", path: "/memorias" },
     { icon: User, label: flags.isAuthenticated ? "Perfil" : "Entrar", path: flags.isAuthenticated ? "/perfil" : "/auth" },
   ];

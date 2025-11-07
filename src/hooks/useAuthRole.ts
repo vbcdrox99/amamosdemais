@@ -1,167 +1,171 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-
-export type Role = "viewer" | "user" | "admin";
-export type Status = "pending" | "approved" | "blocked";
-
-export type Profile = {
-  id: string;
-  email: string | null;
-  full_name?: string | null;
-  phone?: string | null;
-  address?: string | null;
-  status: Status;
-  role: Role;
-};
+import { normalizePhoneNumber } from "@/lib/utils";
 
 type AuthState = {
   loading: boolean;
   session: any | null;
-  profile: Profile | null;
   error?: string;
 };
 
 export function useAuthRole() {
-  const [state, setState] = useState<AuthState>({ loading: true, session: null, profile: null });
+  const [state, setState] = useState<AuthState>({ loading: true, session: null });
+  const [profile, setProfile] = useState<{ id: string; email: string | null; phone_number?: string | null; full_name?: string | null; avatar_url?: string | null; is_approved?: boolean } | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      if (!supabase) {
-        setState({ loading: false, session: null, profile: null, error: "Supabase não configurado" });
-        return;
-      }
-      const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData?.session ?? null;
-      let profile: Profile | null = null;
-      if (session?.user?.id) {
-        // Busca flexível: pega todas as colunas e normaliza no cliente
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", session.user.id)
-          .maybeSingle();
+    let mounted = true;
+    const init = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!mounted) return;
+      setState({ loading: false, session: data.session });
+    };
+    init();
 
-        let loaded = data as any | null;
-        let loadError = error || null;
-
-        // Fallback: em bases antigas, o vínculo pode ser por email
-        if (!loaded && !loadError && session.user.email) {
-          const { data: byEmail, error: errByEmail } = await supabase
-            .from("profiles")
-            .select("*")
-            .eq("email", session.user.email)
-            .maybeSingle();
-          if (byEmail && !errByEmail) {
-            loaded = byEmail as any;
-          } else if (errByEmail) {
-            loadError = errByEmail;
-          }
-        }
-
-        if (!loadError && loaded) {
-          const raw = loaded as any;
-          const roleStr = String(raw.role ?? "viewer").toLowerCase();
-          const statusStr = String(raw.status ?? "pending").toLowerCase();
-          const normalizeRole = (r: string): Role => (r === "admin" ? "admin" : r === "user" ? "user" : "viewer");
-          const normalizeStatus = (s: string): Status => {
-            if (s.includes("approv") || s.includes("aprov")) return "approved";
-            if (s.includes("block")) return "blocked";
-            return "pending";
-          };
-
-          profile = {
-            id: String(raw.id),
-            email: raw.email ?? null,
-            full_name: raw.full_name ?? raw.name ?? null,
-            phone: raw.phone ?? raw.account_number ?? null,
-            address: raw.address ?? null,
-            status: normalizeStatus(statusStr),
-            role: normalizeRole(roleStr),
-          };
-        }
-
-        // Provisiona perfil padrão se não existir (tabela deve existir)
-        if (!profile) {
-          try {
-            const displayName = ((session.user.user_metadata as any)?.account_number
-              ? `Usuário ${(session.user.user_metadata as any)?.account_number}`
-              : (session.user.email ? `Usuário ${session.user.email.split("@")[0]}` : "Usuário"));
-
-            const { error: upsertError } = await supabase
-              .from("profiles")
-              .upsert({
-                id: session.user.id,
-                email: session.user.email,
-                phone: (session.user.user_metadata as any)?.account_number ?? null,
-                full_name: displayName,
-                status: "pending",
-                role: "user",
-              }, { onConflict: "id" });
-
-            if (!upsertError) {
-              const { data: redata } = await supabase
-                .from("profiles")
-                .select("*")
-                .eq("id", session.user.id)
-                .maybeSingle();
-              if (redata) {
-                const raw = redata as any;
-                const roleStr = String(raw.role ?? "viewer").toLowerCase();
-                const statusStr = String(raw.status ?? "pending").toLowerCase();
-                const normalizeRole = (r: string): Role => (r === "admin" ? "admin" : r === "user" ? "user" : "viewer");
-                const normalizeStatus = (s: string): Status => {
-                  if (s.includes("approv") || s.includes("aprov")) return "approved";
-                  if (s.includes("block")) return "blocked";
-                  return "pending";
-                };
-                profile = {
-                  id: String(raw.id),
-                  email: raw.email ?? null,
-                  full_name: raw.full_name ?? raw.name ?? null,
-                  phone: raw.phone ?? raw.account_number ?? null,
-                  address: raw.address ?? null,
-                  status: normalizeStatus(statusStr),
-                  role: normalizeRole(roleStr),
-                };
-              }
-            }
-          } catch (_) {
-            // Ignora erros (ex.: tabela não criada ainda)
-          }
-        }
-      }
-      if (!cancelled) setState({ loading: false, session, profile });
-    }
-    load();
-    const { data: sub } = supabase?.auth.onAuthStateChange(() => load()) ?? { data: null };
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setState({ loading: false, session });
+    });
     return () => {
-      cancelled = true;
-      sub?.subscription?.unsubscribe();
+      mounted = false;
+      sub.subscription.unsubscribe();
     };
   }, []);
 
+  useEffect(() => {
+    const loadProfile = async () => {
+      const userId = state.session?.user?.id;
+      if (!userId) {
+        setProfile(null);
+        return;
+      }
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id,email,phone_number,full_name,avatar_url,is_approved")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) {
+        // Se o refresh token estiver inválido/revogado, força sign-out e limpa storage para evitar loops
+        try {
+          const { clearAuthStorage } = await import("@/lib/supabase");
+          clearAuthStorage();
+        } catch {}
+        try { await supabase.auth.signOut(); } catch {}
+        setProfile({ id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, is_approved: false });
+        // Redireciona para autenticação para recuperar sessão
+        try { if (location.pathname !== "/auth") location.replace("/auth"); } catch {}
+        return;
+      }
+      setProfile(
+        data
+          ? { id: data.id, email: (data as any).email ?? null, phone_number: (data as any).phone_number ?? null, full_name: (data as any).full_name ?? null, avatar_url: (data as any).avatar_url ?? null, is_approved: (data as any).is_approved ?? false }
+          : { id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, is_approved: false }
+      );
+    };
+    loadProfile();
+  }, [state.session?.user?.id]);
+
+  // Assina mudanças no perfil (Realtime) para refletir aprovação instantaneamente
+  useEffect(() => {
+    const userId = state.session?.user?.id;
+    if (!userId) return;
+    const channel = supabase
+      .channel(`profiles-approval-${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
+        (payload) => {
+          const next: any = payload.new ?? {};
+          setProfile((prev) => ({
+            id: prev?.id ?? userId,
+            email: next.email ?? prev?.email ?? null,
+            phone_number: next.phone_number ?? prev?.phone_number ?? null,
+            full_name: next.full_name ?? prev?.full_name ?? null,
+            avatar_url: next.avatar_url ?? prev?.avatar_url ?? null,
+            is_approved: !!next.is_approved,
+          }));
+        }
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [state.session?.user?.id]);
+
+  // Fallback: refetch periódico do perfil quando ainda não aprovado
+  useEffect(() => {
+    const userId = state.session?.user?.id;
+    const notApproved = !!state.session && !profile?.is_approved;
+    if (!userId || !notApproved) return;
+    let cancelled = false;
+    const tick = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id,email,phone_number,full_name,avatar_url,is_approved")
+        .eq("id", userId)
+        .maybeSingle();
+      if (!cancelled && !error && data) {
+        setProfile({
+          id: data.id,
+          email: (data as any).email ?? null,
+          phone_number: (data as any).phone_number ?? null,
+          full_name: (data as any).full_name ?? null,
+          avatar_url: (data as any).avatar_url ?? null,
+          is_approved: !!(data as any).is_approved,
+        });
+      }
+    };
+    const iv = setInterval(tick, 5000);
+    // dispara uma vez imediatamente
+    tick();
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [state.session?.user?.id, profile?.is_approved]);
+
+  // Determina admin pela conta específica solicitada
+  const isAdmin = useMemo(() => {
+    const email = state.session?.user?.email?.toLowerCase() ?? "";
+    const phoneProfile = profile?.phone_number ?? "";
+    // Quando login é por telefone, o email da sessão é um alias: "<digits>@email.com"
+    const emailLocalPart = (email.split("@")[0] ?? "");
+    const phoneFromAlias = normalizePhoneNumber(emailLocalPart);
+    return (
+      email === "dotaplaybrasil111@gmail.com" ||
+      phoneProfile === "11996098995" ||
+      phoneFromAlias === "11996098995"
+    );
+  }, [state.session?.user?.email, profile?.phone_number]);
+
+  // Níveis: 3 admin, 2 autenticado, 1 convidado
   const level = useMemo(() => {
-    if (!state.session || !state.profile) return 1;
-    if (state.profile.role === "admin") return 3;
-    if (state.profile.role === "user" && state.profile.status === "approved") return 2;
-    return 1;
-  }, [state.session, state.profile]);
+    if (isAdmin) return 3;
+    // Considera autenticado apenas se aprovado
+    const approved = !!profile?.is_approved;
+    return state.session && approved ? 2 : 1;
+  }, [state.session, isAdmin, profile?.is_approved]);
 
   const flags = {
-    isAuthenticated: !!state.session,
-    isApproved: state.profile?.status === "approved",
-    isAdmin: state.profile?.role === "admin",
+    // Autenticado quando aprovado OU quando é admin
+    isAuthenticated: !!state.session && (!!profile?.is_approved || isAdmin),
   };
 
+  const approved = !!profile?.is_approved;
+  const approvedOrAdmin = approved || isAdmin;
   const permissions = {
-    canCreateEvents: level >= 2,
-    canComment: level >= 2,
-    canConfirmPresence: level >= 2,
-    canCreatePolls: level >= 2,
-    canEditOwnProfile: level >= 2,
-    canAccessAdmin: level >= 3,
+    canCreateEvents: !!state.session && approvedOrAdmin,
+    canComment: !!state.session && approvedOrAdmin,
+    canConfirmPresence: !!state.session && approvedOrAdmin,
+    canCreatePolls: !!state.session && approvedOrAdmin,
+    canEditOwnProfile: !!state.session && approvedOrAdmin,
+    canAccessAdmin: isAdmin,
   };
 
-  return { ...state, level, flags, permissions };
+  // Considera carregando enquanto sessão está carregando OU perfil ainda não obtido após login
+  const loadingCombined = useMemo(() => {
+    const sessionLoaded = !state.loading;
+    const waitingProfile = !!state.session && profile === null;
+    return state.loading || (sessionLoaded && waitingProfile);
+  }, [state.loading, state.session, profile]);
+
+  return { ...state, loading: loadingCombined, level, flags, permissions, profile, isAdmin } as any;
 }

@@ -1,94 +1,328 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { useAuthRole } from "@/hooks/useAuthRole";
+import { supabase } from "@/lib/supabase";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+
+interface PollOption {
+  id: string;
+  text: string;
+  votes: number;
+  position: number;
+}
+
+interface ProfileInfo {
+  id: string;
+  display_name: string | null;
+  full_name: string | null;
+  avatar_url: string | null;
+}
 
 interface Poll {
   id: string;
   question: string;
-  options: Array<{
-    text: string;
-    votes: number;
-  }>;
+  options: PollOption[];
   totalVotes: number;
+  createdBy?: ProfileInfo;
+  voters?: ProfileInfo[];
 }
 
-const mockPolls: Poll[] = [
-  {
-    id: "1",
-    question: "Onde vamos na sexta?",
-    options: [
-      { text: "Bar A", votes: 12 },
-      { text: "Bar B", votes: 8 },
-      { text: "Casa da Ana", votes: 5 },
-    ],
-    totalVotes: 25,
-  },
-  {
-    id: "2",
-    question: "Que horas começamos o churrasco?",
-    options: [
-      { text: "12:00", votes: 8 },
-      { text: "14:00", votes: 15 },
-      { text: "16:00", votes: 3 },
-    ],
-    totalVotes: 26,
-  },
-];
-
 const Polls = () => {
+  const [polls, setPolls] = useState<Poll[]>([]);
   const [votedPolls, setVotedPolls] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState<boolean>(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newQuestion, setNewQuestion] = useState("");
+  const [newOptions, setNewOptions] = useState<string[]>(["", "", ""]);
   const { permissions, flags } = useAuthRole();
+  const { toast } = useToast();
 
-  const handleVote = (pollId: string, optionIndex: number) => {
+  useEffect(() => {
+    const init = async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData.user?.id ?? null;
+      setUserId(uid);
+      await fetchPolls(uid);
+    };
+    init();
+  }, []);
+
+  async function fetchPolls(currentUserId: string | null) {
+    setLoading(true);
+    const { data: pollRows, error: pollErr } = await supabase
+      .from("polls")
+      .select("id, question, created_at, created_by");
+    if (pollErr) {
+      toast({ title: "Falha ao carregar enquetes", description: pollErr.message });
+      setLoading(false);
+      return;
+    }
+    const ids = (pollRows ?? []).map((p) => p.id);
+    const creatorIds = Array.from(new Set((pollRows ?? []).map((p) => p.created_by).filter(Boolean)));
+    if (ids.length === 0) {
+      setPolls([]);
+      setVotedPolls(new Set());
+      setLoading(false);
+      return;
+    }
+    const { data: optionRows, error: optErr } = await supabase
+      .from("poll_options")
+      .select("id, poll_id, text, position")
+      .in("poll_id", ids)
+      .order("position", { ascending: true });
+    if (optErr) {
+      toast({ title: "Falha ao carregar opções", description: optErr.message });
+      setLoading(false);
+      return;
+    }
+    const { data: voteRows, error: voteErr } = await supabase
+      .from("poll_votes")
+      .select("option_id, poll_id, user_id, profiles(id, avatar_url, display_name, full_name)");
+    if (voteErr) {
+      toast({ title: "Falha ao carregar votos", description: voteErr.message });
+      setLoading(false);
+      return;
+    }
+
+    const voteCountByOption = new Map<string, number>();
+    const votedPollIds = new Set<string>();
+    const votersByPoll = new Map<string, ProfileInfo[]>();
+    (voteRows ?? []).forEach((v) => {
+      voteCountByOption.set(v.option_id, (voteCountByOption.get(v.option_id) ?? 0) + 1);
+      if (currentUserId && v.user_id === currentUserId) {
+        votedPollIds.add(v.poll_id);
+      }
+      const pi: ProfileInfo | null = v.profiles
+        ? {
+            id: v.profiles.id,
+            display_name: v.profiles.display_name ?? null,
+            full_name: v.profiles.full_name ?? null,
+            avatar_url: v.profiles.avatar_url ?? null,
+          }
+        : null;
+      if (pi) {
+        const list = votersByPoll.get(v.poll_id) ?? [];
+        // evitar duplicados
+        if (!list.find((x) => x.id === pi.id)) list.push(pi);
+        votersByPoll.set(v.poll_id, list);
+      }
+    });
+
+    const optionsByPoll = new Map<string, PollOption[]>();
+    (optionRows ?? []).forEach((o) => {
+      const list = optionsByPoll.get(o.poll_id) ?? [];
+      list.push({ id: o.id, text: o.text, position: o.position, votes: voteCountByOption.get(o.id) ?? 0 });
+      optionsByPoll.set(o.poll_id, list);
+    });
+
+    // Buscar perfis de criadores
+    const creatorsMap = new Map<string, ProfileInfo>();
+    if (creatorIds.length > 0) {
+      const { data: creatorsRows, error: creatorsErr } = await supabase
+        .from("profiles")
+        .select("id, display_name, full_name, avatar_url")
+        .in("id", creatorIds as string[]);
+      if (!creatorsErr) {
+        (creatorsRows ?? []).forEach((p) => {
+          creatorsMap.set(p.id, {
+            id: p.id,
+            display_name: p.display_name ?? null,
+            full_name: p.full_name ?? null,
+            avatar_url: p.avatar_url ?? null,
+          });
+        });
+      }
+    }
+
+    const finalPolls: Poll[] = (pollRows ?? []).map((p) => {
+      const opts = (optionsByPoll.get(p.id) ?? []).sort((a, b) => a.position - b.position);
+      const total = opts.reduce((acc, cur) => acc + cur.votes, 0);
+      return {
+        id: p.id,
+        question: p.question,
+        options: opts,
+        totalVotes: total,
+        createdBy: p.created_by ? creatorsMap.get(p.created_by) ?? undefined : undefined,
+        voters: votersByPoll.get(p.id) ?? [],
+      };
+    });
+
+    // Mantém ordem natural; reordenação só ocorre após votos
+    setPolls(finalPolls);
+    setVotedPolls(votedPollIds);
+    setLoading(false);
+  }
+
+  async function handleVote(pollId: string, optionId: string) {
+    if (!flags.isAuthenticated || !userId) {
+      toast({ title: "Entre para votar", description: "Faça login para participar das enquetes." });
+      return;
+    }
+    const { error } = await supabase.from("poll_votes").insert({ poll_id: pollId, option_id: optionId, user_id: userId });
+    if (error) {
+      // Unique violation means already voted
+      if (error.code === "23505") {
+        toast({ title: "Você já votou", description: "Cada pessoa tem 1 voto por enquete." });
+      } else {
+        toast({ title: "Falha ao votar", description: error.message });
+      }
+      return;
+    }
     setVotedPolls((prev) => new Set(prev).add(pollId));
-  };
+    // Bump otimista: incrementa votos localmente e move a enquete para o topo
+    setPolls((prev) => {
+      const updated = prev.map((p) => {
+        if (p.id !== pollId) return p;
+        const newOptions = p.options.map((o) => (o.id === optionId ? { ...o, votes: o.votes + 1 } : o));
+        const newTotal = p.totalVotes + 1;
+        return { ...p, options: newOptions, totalVotes: newTotal };
+      });
+      const idx = updated.findIndex((p) => p.id === pollId);
+      if (idx <= 0) return updated;
+      const [target] = updated.splice(idx, 1);
+      return [target, ...updated];
+    });
+    // Sincroniza dados completos (inclui avatares dos novos votantes)
+    await fetchPolls(userId);
+    // Bump pós-sincronização para manter a enquete votada no topo
+    setPolls((prev) => {
+      const idx = prev.findIndex((p) => p.id === pollId);
+      if (idx <= 0) return prev;
+      const [target] = prev.splice(idx, 1);
+      return [target, ...prev];
+    });
+  }
+
+  async function handleCreatePoll() {
+    if (!flags.isAuthenticated || !userId) {
+      toast({ title: "Entre para criar enquetes", description: "Faça login para criar enquetes." });
+      return;
+    }
+    if (!permissions.canCreatePolls) {
+      toast({ title: "Sem permissão", description: "Sua conta precisa de aprovação para criar enquetes." });
+      return;
+    }
+    const question = newQuestion.trim();
+    const optionTexts = newOptions.map((t) => t.trim()).filter((t) => t.length > 0);
+    if (!question || optionTexts.length < 2) {
+      toast({ title: "Complete a enquete", description: "Informe a pergunta e pelo menos 2 opções." });
+      return;
+    }
+    const { data: insertedPoll, error: pollErr } = await supabase
+      .from("polls")
+      .insert({ question, created_by: userId })
+      .select("id")
+      .single();
+    if (pollErr || !insertedPoll?.id) {
+      toast({ title: "Falha ao criar enquete", description: pollErr?.message ?? "Erro desconhecido" });
+      return;
+    }
+    const pollId = insertedPoll.id as string;
+    const payload = optionTexts.map((text, idx) => ({ poll_id: pollId, text, position: idx }));
+    const { error: optErr } = await supabase.from("poll_options").insert(payload);
+    if (optErr) {
+      toast({ title: "Falha ao criar opções", description: optErr.message });
+      return;
+    }
+    setCreateOpen(false);
+    setNewQuestion("");
+    setNewOptions(["", "", ""]);
+    await fetchPolls(userId);
+    toast({ title: "Enquete criada", description: "Sua enquete foi publicada!" });
+  }
+
+  function updateOptionValue(index: number, value: string) {
+    setNewOptions((prev) => prev.map((t, i) => (i === index ? value : t)));
+  }
+
+  function addOption() {
+    setNewOptions((prev) => (prev.length < 6 ? [...prev, ""] : prev));
+  }
+
+  function removeOption(index: number) {
+    setNewOptions((prev) => prev.filter((_, i) => i !== index));
+  }
 
   return (
     <div className="pb-20 pt-16 px-4 space-y-4 max-w-2xl mx-auto">
       <div className="flex items-center justify-between pt-4">
         <h2 className="text-3xl font-extrabold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">Enquetes</h2>
-        <Button size="icon" className="rounded-full h-12 w-12" disabled={!permissions.canCreatePolls} title={!permissions.canCreatePolls ? (flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre e aguarde aprovação para criar enquetes.") : undefined}>
+        <Button
+          size="icon"
+          className="rounded-full h-12 w-12"
+          disabled={!permissions.canCreatePolls}
+          title={!permissions.canCreatePolls ? (flags.isAuthenticated ? "Sua conta ainda não foi aprovada." : "Entre e aguarde aprovação para criar enquetes.") : undefined}
+          onClick={() => setCreateOpen(true)}
+        >
           <Plus className="h-6 w-6" />
         </Button>
       </div>
 
       <div className="space-y-4">
-        {mockPolls.map((poll) => {
+        {loading && (
+          <Card className="p-4 bg-card border-border">
+            <div className="text-sm text-muted-foreground">Carregando enquetes...</div>
+          </Card>
+        )}
+        {!loading && polls.length === 0 && (
+          <Card className="p-4 bg-card border-border">
+            <div className="text-sm text-muted-foreground">Nenhuma enquete ainda. Crie a primeira!</div>
+          </Card>
+        )}
+        {!loading && polls.map((poll) => {
           const hasVoted = votedPolls.has(poll.id);
-          
           return (
             <Card key={poll.id} className="p-4 space-y-4 bg-card border-border">
-              <h3 className="font-semibold text-foreground">{poll.question}</h3>
-              
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-semibold text-foreground">{poll.question}</h3>
+              </div>
+              {poll.createdBy && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Avatar className="h-6 w-6">
+                    {poll.createdBy.avatar_url ? (
+                      <AvatarImage src={poll.createdBy.avatar_url} alt={poll.createdBy.display_name ?? poll.createdBy.full_name ?? "Criador"} />
+                    ) : (
+                      <AvatarFallback>{((poll.createdBy.display_name ?? poll.createdBy.full_name ?? "?").slice(0, 1)).toUpperCase()}</AvatarFallback>
+                    )}
+                  </Avatar>
+                  <span>
+                    Criado por {poll.createdBy.display_name ?? poll.createdBy.full_name ?? "desconhecido"}
+                  </span>
+                </div>
+              )}
               <div className="space-y-2">
-                {poll.options.map((option, index) => {
-                  const percentage = Math.round((option.votes / poll.totalVotes) * 100);
-                  
+                {poll.options.map((option) => {
+                  const percentage = poll.totalVotes > 0 ? Math.round((option.votes / poll.totalVotes) * 100) : 0;
                   return (
                     <button
-                      key={index}
-                      onClick={() => !hasVoted && handleVote(poll.id, index)}
+                      key={option.id}
+                      onClick={() => !hasVoted && handleVote(poll.id, option.id)}
                       disabled={hasVoted}
                       className="w-full text-left disabled:cursor-default"
                     >
                       <div className="relative overflow-hidden rounded-lg border-2 border-border hover:border-primary/50 transition-colors p-3">
                         {hasVoted && (
-                          <div
-                            className="absolute inset-0 bg-primary/20"
-                            style={{ width: `${percentage}%` }}
-                          />
+                          <div className="absolute inset-y-0 left-0 bg-primary/20" style={{ width: `${percentage}%` }} />
                         )}
                         <div className="relative flex items-center justify-between">
-                          <span className="font-medium text-foreground">
-                            {option.text}
-                          </span>
+                          <span className="font-medium text-foreground">{option.text}</span>
                           {hasVoted && (
-                            <span className="text-sm font-semibold text-primary">
-                              {percentage}%
-                            </span>
+                            <span className="text-sm font-semibold text-primary">{percentage}%</span>
                           )}
                         </div>
                       </div>
@@ -96,14 +330,81 @@ const Polls = () => {
                   );
                 })}
               </div>
-              
-              <div className="text-sm text-muted-foreground">
-                {poll.totalVotes} votos
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-muted-foreground">{poll.totalVotes} votos</div>
+                {poll.voters && poll.voters.length > 0 && (
+                  <div className="flex -space-x-2">
+                    {poll.voters.slice(0, 8).map((u) => (
+                      <Avatar key={u.id} className="h-6 w-6 ring-2 ring-background">
+                        {u.avatar_url ? (
+                          <AvatarImage src={u.avatar_url} alt={u.display_name ?? u.full_name ?? "Votante"} />
+                        ) : (
+                          <AvatarFallback>{((u.display_name ?? u.full_name ?? "?").slice(0, 1)).toUpperCase()}</AvatarFallback>
+                        )}
+                      </Avatar>
+                    ))}
+                    {poll.voters.length > 8 && (
+                      <div className="h-6 w-6 rounded-full bg-muted text-xs flex items-center justify-center ring-2 ring-background">
+                        +{poll.voters.length - 8}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </Card>
           );
         })}
       </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Criar enquete</DialogTitle>
+            <DialogDescription>Brincadeiras e opiniões — mínimo 2 opções.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="poll-question">Pergunta</Label>
+              <Input
+                id="poll-question"
+                value={newQuestion}
+                onChange={(e) => setNewQuestion(e.target.value)}
+                placeholder="Ex: Qual é o melhor sabor de pizza?"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Opções</Label>
+              {newOptions.map((opt, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <Input
+                    value={opt}
+                    onChange={(e) => updateOptionValue(idx, e.target.value)}
+                    placeholder={`Opção ${idx + 1}`}
+                  />
+                  {newOptions.length > 2 && (
+                    <Button type="button" variant="outline" onClick={() => removeOption(idx)} title="Remover opção">
+                      Remover
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <div className="flex justify-end">
+                <Button type="button" variant="ghost" onClick={addOption} disabled={newOptions.length >= 6}>
+                  Adicionar opção
+                </Button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex items-center justify-between gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">Cancelar</Button>
+            </DialogClose>
+            <Button type="button" onClick={handleCreatePoll} disabled={!permissions.canCreatePolls}>
+              Publicar enquete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

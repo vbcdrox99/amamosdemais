@@ -1,83 +1,137 @@
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-
-type Profile = {
-  id: string;
-  email: string | null;
-  full_name: string | null;
-  status: "pending" | "approved" | "blocked";
-  role: "viewer" | "user" | "admin";
-};
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { useAuthRole } from "@/hooks/useAuthRole";
+import { formatPhoneBR } from "@/lib/utils";
 
 const Admin = () => {
   const { toast } = useToast();
-  const [pending, setPending] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const loadPending = async () => {
-    if (!supabase) return;
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id,email,full_name,status,role")
-      .eq("status", "pending")
-      .order("created_at", { ascending: true });
-    setLoading(false);
-    if (error) {
-      toast({ title: "Erro ao carregar", description: error.message });
-    } else {
-      setPending((data ?? []) as Profile[]);
-    }
-  };
+  const { permissions } = useAuthRole() as any;
+  const [profiles, setProfiles] = useState<Array<{ id: string; email: string | null; phone_number: string | null; full_name: string | null; is_approved: boolean }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
-    loadPending();
+    const load = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id,email,phone_number,full_name,is_approved")
+        .order("phone_number", { ascending: true, nullsFirst: true })
+        .order("full_name", { ascending: true, nullsFirst: true });
+      setLoading(false);
+      if (error) {
+        toast({ title: "Erro ao carregar usuários", description: error.message, variant: "destructive" });
+        return;
+      }
+      setProfiles(data ?? []);
+    };
+    load();
   }, []);
 
-  const updateUser = async (id: string, changes: Partial<Profile>, action: string) => {
-    if (!supabase) return;
-    const { error } = await supabase.from("profiles").update(changes).eq("id", id);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return profiles;
+    return profiles.filter(p => (((p.full_name ?? "") + (p.phone_number ?? "")).toLowerCase().includes(q)));
+  }, [profiles, query]);
+
+  const approved = filtered.filter(p => p.is_approved);
+  const pending = filtered.filter(p => !p.is_approved);
+
+  const handleApprove = async (userId: string) => {
+    const { error } = await supabase.from("profiles").update({ is_approved: true }).eq("id", userId);
     if (error) {
-      toast({ title: "Erro", description: error.message });
+      toast({ title: "Erro ao aprovar usuário", description: error.message, variant: "destructive" });
       return;
     }
-    // Log action
-    await supabase.from("admin_logs").insert({ action, target_user_id: id });
-    toast({ title: "Sucesso", description: "Atualização realizada" });
-    loadPending();
+    toast({ title: "Usuário aprovado", description: "Agora ele pode acessar o app." });
+    // reload
+    const { data } = await supabase
+      .from("profiles")
+      .select("id,email,phone_number,full_name,is_approved")
+      .order("phone_number", { ascending: true, nullsFirst: true })
+      .order("full_name", { ascending: true, nullsFirst: true });
+    setProfiles(data ?? []);
   };
 
+  if (!permissions?.canAccessAdmin) {
+    return (
+      <div className="min-h-screen pt-24 pb-20 px-4">
+        <h2 className="text-2xl font-bold mb-4 text-foreground">Painel Administrativo</h2>
+        <p className="text-sm text-muted-foreground">Acesso restrito. Entre com uma conta admin.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen pt-14 pb-20 px-4">
+    <div className="min-h-screen pt-24 pb-20 px-4">
       <h2 className="text-2xl font-bold mb-4 text-foreground">Painel Administrativo</h2>
-      <p className="text-sm text-muted-foreground mb-6">Aprovar cadastros, gerenciar níveis de acesso e moderar.</p>
+      <p className="text-sm text-muted-foreground mb-4">Gerencie e visualize todos os usuários.</p>
 
       <Card className="p-4 bg-card border-border">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-foreground">Pendentes de Aprovação</h3>
-          <Button variant="outline" onClick={loadPending} disabled={loading}>Atualizar</Button>
+        <div className="flex items-center gap-2 mb-4">
+          <Input placeholder="Buscar por nome ou telefone" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <Button variant="outline" onClick={() => setQuery("")}>Limpar</Button>
         </div>
-        <div className="mt-4 space-y-3">
-          {pending.length === 0 && (
-            <div className="text-sm text-muted-foreground">Nenhum usuário pendente.</div>
-          )}
-          {pending.map((p) => (
-            <div key={p.id} className="flex items-center justify-between gap-3 p-3 rounded border border-white/10">
-              <div>
-                <div className="text-sm text-foreground font-medium">{p.full_name || p.phone || p.email}</div>
-                <div className="text-xs text-muted-foreground">Status: {p.status} • Papel: {p.role}</div>
-              </div>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={() => updateUser(p.id, { status: "approved", role: "user" }, "approve_user")}>Aprovar</Button>
-                <Button size="sm" variant="destructive" onClick={() => updateUser(p.id, { status: "blocked" }, "block_user")}>Bloquear</Button>
-              </div>
+
+        {loading && <div className="text-sm text-muted-foreground">Carregando usuários...</div>}
+        {!loading && filtered.length === 0 && (
+          <div className="text-sm text-muted-foreground">Nenhum usuário encontrado.</div>
+        )}
+
+        {!loading && (
+          <div className="space-y-6">
+            <div>
+              <h4 className="font-semibold text-foreground">Usuários autenticados ({approved.length})</h4>
+              {approved.length === 0 ? (
+                <div className="text-sm text-muted-foreground">Nenhum aprovado.</div>
+              ) : (
+                <div className="space-y-2 mt-2">
+                  {approved.map((u) => (
+                    <div key={u.id} className="flex items-center justify-between rounded-md border border-border p-3">
+                      <div>
+                        <div className="text-sm font-semibold text-foreground">{formatPhoneBR(u.phone_number || "")}</div>
+                        {u.full_name && (
+                          <div className="text-xs text-muted-foreground">{u.full_name}</div>
+                        )}
+                      </div>
+                      <div className="flex gap-2" />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          ))}
-        </div>
+
+            <div>
+              <h4 className="font-semibold text-foreground">Usuários a espera ({pending.length})</h4>
+              {pending.length === 0 ? (
+                <div className="text-sm text-muted-foreground">Nenhum pendente.</div>
+              ) : (
+                <div className="space-y-2 mt-2">
+                  {pending.map((u) => (
+                    <div key={u.id} className="flex items-center justify-between rounded-md border border-border p-3">
+                      <div>
+                        <div className="text-sm font-semibold text-foreground">{formatPhoneBR(u.phone_number || "")}</div>
+                        {u.full_name && (
+                          <div className="text-xs text-muted-foreground">{u.full_name}</div>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <Button onClick={() => handleApprove(u.id)}>Aprovar</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </Card>
+
+      <p className="text-xs text-muted-foreground mt-3">Nota: ações de edição/banimento podem ser adicionadas depois.</p>
     </div>
   );
 };
