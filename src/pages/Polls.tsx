@@ -3,7 +3,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useAuthRole } from "@/hooks/useAuthRole";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabase";
 import {
   Dialog,
   DialogContent,
@@ -109,10 +109,10 @@ const Polls = () => {
       }
       const pi: ProfileInfo | null = v.profiles
         ? {
-            id: v.profiles.id,
-            display_name: v.profiles.display_name ?? null,
-            full_name: v.profiles.full_name ?? null,
-            avatar_url: v.profiles.avatar_url ?? null,
+            id: (v.profiles as any).id,
+            display_name: (v.profiles as any).display_name ?? null,
+            full_name: (v.profiles as any).full_name ?? null,
+            avatar_url: (v.profiles as any).avatar_url ?? null,
           }
         : null;
       if (pi) {

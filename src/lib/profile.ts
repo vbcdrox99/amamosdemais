@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabase";
 import { normalizePhoneNumber, phoneToEmailAlias } from "@/lib/utils";
 
 export async function ensureProfileForCurrentUser(fullName?: string, phoneRaw?: string) {

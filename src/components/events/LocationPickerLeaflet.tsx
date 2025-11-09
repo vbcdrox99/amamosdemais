@@ -150,7 +150,7 @@ export function LocationPickerLeaflet({ value, onChange, name = "location", clas
       )}
 
       <div className="rounded-md overflow-hidden border border-muted-foreground/20">
-        <MapContainer center={[center.lat, center.lng]} zoom={13} style={{ height: 300, width: "100%" }}>
+        <MapContainer center={[center.lat, center.lng] as [number, number]} zoom={13} style={{ height: 300, width: "100%" }}>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -164,7 +164,7 @@ export function LocationPickerLeaflet({ value, onChange, name = "location", clas
           />
 
           {coords && (
-            <Marker position={[coords.lat, coords.lng]} draggable eventHandlers={{ dragend: handleMarkerDragEnd }}>
+            <Marker position={[coords.lat, coords.lng] as [number, number]} draggable={true} eventHandlers={{ dragend: handleMarkerDragEnd }}>
               <Popup>
                 Arraste para ajustar. Clique no mapa para mover.
               </Popup>
