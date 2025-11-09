@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, MapPin, Clock, Calendar, Share2, Copy } from "lucide-react";
+import { ArrowLeft, MapPin, Clock, Calendar, Share2, Copy, Flame } from "lucide-react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import ProfileQuickView from "@/components/profile/ProfileQuickView";
 import { useAuthRole } from "@/hooks/useAuthRole";
 import { supabase } from "@/lib/supabase";
 import { formatPhoneBR } from "@/lib/utils";
@@ -50,6 +51,8 @@ const EventDetails = () => {
     phone_number: string | null;
   }>>([]);
   const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [profileViewOpen, setProfileViewOpen] = useState(false);
+  const [profileViewUserId, setProfileViewUserId] = useState<string | null>(null);
 
   const loadParticipants = async () => {
     if (!id) return;
@@ -57,7 +60,7 @@ const EventDetails = () => {
       setParticipantsLoading(true);
       const { data, error } = await supabase
         .from("event_rsvps")
-        .select("user_id,status,profiles:profiles(id,full_name,avatar_url,phone_number)")
+        .select("user_id,status,profiles:profiles(id,full_name,avatar_url,phone_number,instagram)")
         .eq("event_id", Number(id));
       if (error) throw error;
       const mapped = (data ?? []).map((row: any) => ({
@@ -200,6 +203,17 @@ const EventDetails = () => {
     const eventDate = new Date(event.event_timestamp);
     const diffMs = eventDate.getTime() - now.getTime();
     return diffMs > 0 && diffMs <= 48 * 60 * 60 * 1000; // até 48h antes
+  }, [event?.event_timestamp]);
+
+  // Evento já passou? Usado para desabilitar RSVP
+  const isPast = useMemo(() => {
+    if (!event?.event_timestamp) return false;
+    try {
+      const d = new Date(event.event_timestamp);
+      return d.getTime() < Date.now();
+    } catch {
+      return false;
+    }
   }, [event?.event_timestamp]);
 
   const eventUrl = `${window.location.origin}/evento/${id ?? ""}`;
@@ -462,7 +476,7 @@ const EventDetails = () => {
   }
 
   return (
-    <div className={`min-h-screen pb-20 pt-14 ${isCheckinWindow ? "border-2 border-emerald-500/60 rounded-xl" : ""}`}> 
+    <div className={`min-h-screen pb-20 pt-14 ${isCheckinWindow ? "border-2 border-emerald-500/60 rounded-xl" : ""} ${(() => { const hotCount = participants.filter(p => p.status === "going" || p.status === "maybe").length; return hotCount >= 6 ? "ring-2 ring-amber-400/50 rounded-xl shadow-[0_0_40px_rgba(250,204,21,0.28)]" : ""; })()}`}> 
       <Button
         variant="ghost"
         size="icon"
@@ -479,6 +493,18 @@ const EventDetails = () => {
           className="w-full h-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+        {(() => {
+          const hotCount = participants.filter(p => p.status === "going" || p.status === "maybe").length;
+          if (hotCount >= 6) {
+            return (
+              <div className="absolute top-3 left-3 flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/20 backdrop-blur-md ring-1 ring-amber-300/40 shadow-[0_0_12px_rgba(250,204,21,0.35)] text-amber-300 text-xs font-semibold">
+                <Flame className="h-4 w-4" />
+                <span>{hotCount}+ bombando</span>
+              </div>
+            );
+          }
+          return null;
+        })()}
         <h1 className="absolute bottom-4 left-4 right-4 text-2xl font-bold text-foreground">
           {event?.title ?? "Rolê"}
         </h1>
@@ -660,7 +686,7 @@ const EventDetails = () => {
                   variant={rsvpStatus === "going" ? "rsvpActive" : "rsvp"}
                   onClick={() => handleUpdateRsvp("going")}
                   className="h-12 font-semibold"
-                  disabled={!permissions.canConfirmPresence}
+                  disabled={!permissions.canConfirmPresence || isPast}
                 >
                   VOU
                 </Button>
@@ -668,7 +694,7 @@ const EventDetails = () => {
                   variant={rsvpStatus === "maybe" ? "rsvpActive" : "rsvp"}
                   onClick={() => handleUpdateRsvp("maybe")}
                   className="h-12 font-semibold"
-                  disabled={!permissions.canConfirmPresence}
+                  disabled={!permissions.canConfirmPresence || isPast}
                 >
                   TALVEZ
                 </Button>
@@ -676,7 +702,7 @@ const EventDetails = () => {
                   variant={rsvpStatus === "not-going" ? "rsvpActive" : "rsvp"}
                   onClick={() => handleUpdateRsvp("not-going")}
                   className="h-12 font-semibold"
-                  disabled={!permissions.canConfirmPresence}
+                  disabled={!permissions.canConfirmPresence || isPast}
                 >
                   NÃO VOU
                 </Button>
@@ -704,8 +730,19 @@ const EventDetails = () => {
                       : p.status === "maybe"
                       ? "ring-[3px] ring-amber-400/60"
                       : "ring-[3px] ring-rose-400/60";
+                  const canViewProfile = !!permissions?.canEditOwnProfile;
                   return (
-                    <div key={`${p.user_id}-${p.status}`} className="flex items-center gap-2">
+                    <button
+                      key={`${p.user_id}-${p.status}`}
+                      className="flex items-center gap-2"
+                      type="button"
+                      onClick={() => {
+                        if (!canViewProfile) return;
+                        setProfileViewUserId(p.user_id);
+                        setProfileViewOpen(true);
+                      }}
+                      disabled={!canViewProfile}
+                    >
                       <Avatar className={`h-10 w-10 ${ringClass}`}>
                         {p.avatar_url ? (
                           <AvatarImage src={p.avatar_url} alt={name} />
@@ -717,7 +754,7 @@ const EventDetails = () => {
                         </AvatarFallback>
                       </Avatar>
                       <div className="text-xs text-muted-foreground">{name}</div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -807,6 +844,8 @@ const EventDetails = () => {
             </Dialog>
           </div>
         </TabsContent>
+        {/* Modal de perfil */}
+        <ProfileQuickView userId={profileViewUserId} open={profileViewOpen} onOpenChange={setProfileViewOpen} />
       </Tabs>
     </div>
   );

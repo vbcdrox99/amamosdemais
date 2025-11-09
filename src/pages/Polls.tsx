@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import ProfileQuickView from "@/components/profile/ProfileQuickView";
 
 interface PollOption {
   id: string;
@@ -51,6 +52,8 @@ const Polls = () => {
   const [newOptions, setNewOptions] = useState<string[]>(["", "", ""]);
   const { permissions, flags } = useAuthRole();
   const { toast } = useToast();
+  const [profileViewOpen, setProfileViewOpen] = useState(false);
+  const [profileViewUserId, setProfileViewUserId] = useState<string | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -275,24 +278,34 @@ const Polls = () => {
 
       <div className="space-y-4">
         {loading && (
-          <Card className="p-4 bg-card border-border">
-            <div className="text-sm text-muted-foreground">Carregando enquetes...</div>
-          </Card>
+          <div className="rounded-xl p-4 border border-white/10 bg-white/5 backdrop-blur-md">
+            <div className="text-sm text-white/70">Carregando enquetes...</div>
+          </div>
         )}
         {!loading && polls.length === 0 && (
-          <Card className="p-4 bg-card border-border">
-            <div className="text-sm text-muted-foreground">Nenhuma enquete ainda. Crie a primeira!</div>
-          </Card>
+          <div className="rounded-xl p-4 border border-white/10 bg-white/5 backdrop-blur-md">
+            <div className="text-sm text-white/70">Nenhuma enquete ainda. Crie a primeira!</div>
+          </div>
         )}
         {!loading && polls.map((poll) => {
           const hasVoted = votedPolls.has(poll.id);
           return (
-            <Card key={poll.id} className="p-4 space-y-4 bg-card border-border">
+            <div key={poll.id} className="rounded-xl p-4 space-y-4 border border-white/10 bg-white/5 backdrop-blur-md">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="font-semibold text-foreground">{poll.question}</h3>
+                <h3 className="font-semibold text-white">{poll.question}</h3>
               </div>
               {poll.createdBy && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="text-sm text-muted-foreground">
+                  <button
+                    type="button"
+                    className="flex items-center gap-2"
+                    onClick={() => {
+                      if (!permissions.canEditOwnProfile) return;
+                      setProfileViewUserId(poll.createdBy?.id || null);
+                      setProfileViewOpen(true);
+                    }}
+                    disabled={!permissions.canEditOwnProfile}
+                  >
                   <Avatar className="h-6 w-6">
                     {poll.createdBy.avatar_url ? (
                       <AvatarImage src={poll.createdBy.avatar_url} alt={poll.createdBy.display_name ?? poll.createdBy.full_name ?? "Criador"} />
@@ -303,6 +316,7 @@ const Polls = () => {
                   <span>
                     Criado por {poll.createdBy.display_name ?? poll.createdBy.full_name ?? "desconhecido"}
                   </span>
+                  </button>
                 </div>
               )}
               <div className="space-y-2">
@@ -315,14 +329,14 @@ const Polls = () => {
                       disabled={hasVoted}
                       className="w-full text-left disabled:cursor-default"
                     >
-                      <div className="relative overflow-hidden rounded-lg border-2 border-border hover:border-primary/50 transition-colors p-3">
+                      <div className="relative overflow-hidden rounded-lg border-2 border-white/10 hover:border-sky-400/50 transition-colors p-3">
                         {hasVoted && (
-                          <div className="absolute inset-y-0 left-0 bg-primary/20" style={{ width: `${percentage}%` }} />
+                          <div className="absolute inset-y-0 left-0 bg-sky-500/25" style={{ width: `${percentage}%` }} />
                         )}
                         <div className="relative flex items-center justify-between">
                           <span className="font-medium text-foreground">{option.text}</span>
                           {hasVoted && (
-                            <span className="text-sm font-semibold text-primary">{percentage}%</span>
+                            <span className="text-sm font-semibold text-sky-400">{percentage}%</span>
                           )}
                         </div>
                       </div>
@@ -331,17 +345,28 @@ const Polls = () => {
                 })}
               </div>
               <div className="flex items-center justify-between">
-                <div className="text-sm text-muted-foreground">{poll.totalVotes} votos</div>
+                <div className="text-sm text-white/70">{poll.totalVotes} votos</div>
                 {poll.voters && poll.voters.length > 0 && (
                   <div className="flex -space-x-2">
                     {poll.voters.slice(0, 8).map((u) => (
-                      <Avatar key={u.id} className="h-6 w-6 ring-2 ring-background">
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => {
+                          if (!permissions.canEditOwnProfile) return;
+                          setProfileViewUserId(u.id);
+                          setProfileViewOpen(true);
+                        }}
+                        disabled={!permissions.canEditOwnProfile}
+                      >
+                      <Avatar className="h-6 w-6 ring-2 ring-background">
                         {u.avatar_url ? (
                           <AvatarImage src={u.avatar_url} alt={u.display_name ?? u.full_name ?? "Votante"} />
                         ) : (
                           <AvatarFallback>{((u.display_name ?? u.full_name ?? "?").slice(0, 1)).toUpperCase()}</AvatarFallback>
                         )}
                       </Avatar>
+                      </button>
                     ))}
                     {poll.voters.length > 8 && (
                       <div className="h-6 w-6 rounded-full bg-muted text-xs flex items-center justify-center ring-2 ring-background">
@@ -351,7 +376,7 @@ const Polls = () => {
                   </div>
                 )}
               </div>
-            </Card>
+            </div>
           );
         })}
       </div>
@@ -405,6 +430,8 @@ const Polls = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Modal de perfil */}
+      <ProfileQuickView userId={profileViewUserId} open={profileViewOpen} onOpenChange={setProfileViewOpen} />
     </div>
   );
 };

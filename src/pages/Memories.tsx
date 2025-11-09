@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, Fragment } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,6 +16,8 @@ type EventRow = {
   title: string;
   cover_image_url: string | null;
   event_timestamp: string | null;
+  description?: string | null;
+  location_text?: string | null;
 };
 
 const Memories = () => {
@@ -30,13 +33,14 @@ const Memories = () => {
   const [sampleExpanded, setSampleExpanded] = useState(false);
   const [sampleDialogOpen, setSampleDialogOpen] = useState(false);
   const [eventDialogId, setEventDialogId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       const { data, error } = await supabase
         .from("events")
-        .select("id,title,cover_image_url,event_timestamp")
+        .select("id,title,cover_image_url,event_timestamp,description,location_text")
         .order("event_timestamp", { ascending: false, nullsFirst: false });
       setLoading(false);
       if (error) {
@@ -45,10 +49,16 @@ const Memories = () => {
       }
       const now = Date.now();
       const past = (data ?? []).filter((e: any) => !!e.event_timestamp && new Date(e.event_timestamp).getTime() < now);
-      setEvents(past as EventRow[]);
+      const pastEvents = past as EventRow[];
+      setEvents(pastEvents);
+      // Se veio um eventId na URL, abre automaticamente o diálogo correspondente
+      const initialEventId = searchParams.get("eventId");
+      if (initialEventId && pastEvents.some((e) => String(e.id) === String(initialEventId))) {
+        setEventDialogId(String(initialEventId));
+      }
     };
     load();
-  }, []);
+  }, [searchParams]);
 
   // Carrega check-ins confirmados do usuário para os eventos listados
   useEffect(() => {
@@ -419,6 +429,24 @@ const Memories = () => {
                     <DialogDescription>{dateStr} {timeStr && `• ${timeStr}`}</DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4">
+                    {/* Foto de capa do rolê */}
+                    <div className="relative aspect-video rounded-lg overflow-hidden">
+                      <img
+                        src={ev.cover_image_url ?? "/placeholder.svg"}
+                        alt={ev.title}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent" />
+                    </div>
+                    {/* Informações básicas do rolê (sempre visíveis) */}
+                    <div className="space-y-1">
+                      {ev.description && (
+                        <p className="text-sm text-foreground/90">{ev.description}</p>
+                      )}
+                      {ev.location_text && (
+                        <p className="text-sm text-muted-foreground">Local: {ev.location_text}</p>
+                      )}
+                    </div>
                     {/* Nota e avaliação */}
                     <div className="space-y-2">
                       <h4 className="font-semibold">Nota do rolê</h4>

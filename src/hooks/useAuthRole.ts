@@ -10,7 +10,7 @@ type AuthState = {
 
 export function useAuthRole() {
   const [state, setState] = useState<AuthState>({ loading: true, session: null });
-  const [profile, setProfile] = useState<{ id: string; email: string | null; phone_number?: string | null; full_name?: string | null; avatar_url?: string | null; is_approved?: boolean } | null>(null);
+  const [profile, setProfile] = useState<{ id: string; email: string | null; phone_number?: string | null; full_name?: string | null; avatar_url?: string | null; instagram?: string | null; is_approved?: boolean } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -39,7 +39,7 @@ export function useAuthRole() {
       }
       const { data, error } = await supabase
         .from("profiles")
-        .select("id,email,phone_number,full_name,avatar_url,is_approved")
+        .select("id,email,phone_number,full_name,avatar_url,instagram,is_approved")
         .eq("id", userId)
         .maybeSingle();
       if (error) {
@@ -56,8 +56,8 @@ export function useAuthRole() {
       }
       setProfile(
         data
-          ? { id: data.id, email: (data as any).email ?? null, phone_number: (data as any).phone_number ?? null, full_name: (data as any).full_name ?? null, avatar_url: (data as any).avatar_url ?? null, is_approved: (data as any).is_approved ?? false }
-          : { id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, is_approved: false }
+          ? { id: data.id, email: (data as any).email ?? null, phone_number: (data as any).phone_number ?? null, full_name: (data as any).full_name ?? null, avatar_url: (data as any).avatar_url ?? null, instagram: (data as any).instagram ?? null, is_approved: (data as any).is_approved ?? false }
+          : { id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, instagram: null, is_approved: false }
       );
     };
     loadProfile();
@@ -80,6 +80,7 @@ export function useAuthRole() {
             phone_number: next.phone_number ?? prev?.phone_number ?? null,
             full_name: next.full_name ?? prev?.full_name ?? null,
             avatar_url: next.avatar_url ?? prev?.avatar_url ?? null,
+            instagram: next.instagram ?? prev?.instagram ?? null,
             is_approved: !!next.is_approved,
           }));
         }
@@ -99,7 +100,7 @@ export function useAuthRole() {
     const tick = async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id,email,phone_number,full_name,avatar_url,is_approved")
+        .select("id,email,phone_number,full_name,avatar_url,instagram,is_approved")
         .eq("id", userId)
         .maybeSingle();
       if (!cancelled && !error && data) {
@@ -109,6 +110,7 @@ export function useAuthRole() {
           phone_number: (data as any).phone_number ?? null,
           full_name: (data as any).full_name ?? null,
           avatar_url: (data as any).avatar_url ?? null,
+          instagram: (data as any).instagram ?? null,
           is_approved: !!(data as any).is_approved,
         });
       }

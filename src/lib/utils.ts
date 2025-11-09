@@ -48,3 +48,29 @@ export function formatPhoneBR(raw: string): string {
   }
   return d;
 }
+
+// Instagram helpers
+export function extractInstagramHandle(raw: string): string | null {
+  let s = (raw || "").trim();
+  if (!s) return null;
+  // Remover prefixos de URL comuns
+  s = s.replace(/^https?:\/\/(www\.)?instagram\.com\//i, "");
+  s = s.replace(/^instagram\.com\//i, "");
+  // Remover arrobas iniciais
+  s = s.replace(/^@+/, "");
+  // Pegar somente o primeiro segmento antes de /, ?, #
+  s = s.split(/[\/?#]/)[0];
+  s = s.trim();
+  if (!s) return null;
+  return s;
+}
+
+export function formatInstagramDisplay(handle: string | null | undefined): string {
+  const h = (handle || "").trim();
+  return h ? `@${h}` : "Não informado";
+}
+
+export function formatInstagramUrl(handle: string | null | undefined): string | null {
+  const h = (handle || "").trim();
+  return h ? `https://www.instagram.com/${h}` : null;
+}

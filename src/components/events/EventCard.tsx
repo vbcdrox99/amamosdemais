@@ -1,7 +1,9 @@
-import { Calendar, Clock, MapPin } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Calendar, Clock, MapPin, Flame } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Link } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
 
 interface EventCardProps {
   id: string;
@@ -15,6 +17,8 @@ interface EventCardProps {
     avatar?: string;
   }>;
   attendeeCount: number;
+  // Indica se o evento já passou, para estilizar a data
+  isPast?: boolean;
 }
 
 export const EventCard = ({
@@ -26,10 +30,32 @@ export const EventCard = ({
   coverImage,
   attendees,
   attendeeCount,
+  isPast = false,
 }: EventCardProps) => {
+  const [hotCount, setHotCount] = useState<number | null>(null);
+  const isHot = (hotCount ?? 0) >= 6;
+
+  useEffect(() => {
+    const fetchHotCount = async () => {
+      try {
+        const { count, error } = await supabase
+          .from("event_rsvps")
+          .select("id", { count: "exact", head: true })
+          .eq("event_id", Number(id))
+          .in("status", ["going", "maybe"]);
+        if (error) throw error;
+        setHotCount(count ?? 0);
+      } catch (e) {
+        // Silencioso: falha em contagem não deve quebrar o card
+        setHotCount(0);
+      }
+    };
+    fetchHotCount();
+  }, [id]);
+
   return (
     <Link to={`/evento/${id}`}>
-      <Card className="group overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-md hover:border-primary/50 transition-all hover:shadow-lg hover:shadow-primary/10 cursor-pointer">
+      <Card className={`group overflow-hidden rounded-2xl border ${isHot ? "border-amber-300/40 ring-1 ring-amber-400/50 shadow-[0_0_30px_rgba(250,204,21,0.25)]" : "border-white/10"} bg-gradient-to-br from-neutral-900/60 to-neutral-800/50 backdrop-blur-sm ${isHot ? "hover:shadow-[0_12px_44px_rgba(250,204,21,0.35)]" : "hover:shadow-[0_12px_40px_rgba(16,185,129,0.15)]"} hover:border-white/20 hover:ring-1 hover:ring-primary/30 transition-all duration-300 hover:scale-[1.005] cursor-pointer`}>
         <div className="relative h-48 overflow-hidden">
           <img
             src={coverImage}
@@ -37,7 +63,19 @@ export const EventCard = ({
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/25 to-transparent" />
-          <div className="absolute top-3 right-3 px-3 py-2 rounded-lg bg-gradient-to-br from-emerald-600 to-sky-600 text-white shadow-md">
+          {isHot && (
+            <div className="absolute top-3 left-3 flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/20 backdrop-blur-md ring-1 ring-amber-300/40 shadow-[0_0_12px_rgba(250,204,21,0.35)] text-amber-300 text-xs font-semibold">
+              <Flame className="h-4 w-4" />
+              <span>{(hotCount ?? 6)}+ bombando</span>
+            </div>
+          )}
+          <div
+            className={`absolute top-3 right-3 px-3 py-2 rounded-lg text-white shadow-md backdrop-blur-sm ring-1 ring-white/10 ${
+              isPast
+                ? "bg-gradient-to-br from-zinc-700 to-gray-800"
+                : "bg-gradient-to-br from-emerald-600 to-sky-600"
+            }`}
+          >
             <div className="text-xs opacity-80">Data</div>
             <div className="text-sm font-semibold">{date}</div>
           </div>
@@ -59,10 +97,10 @@ export const EventCard = ({
             </div>
           </div>
           
-          <div className="flex items-center gap-3 pt-2">
+          <div className="flex items-center gap-3 pt-3 mt-1 border-t border-white/10">
             <div className="flex -space-x-2">
               {attendees.slice(0, 4).map((attendee, index) => (
-                <Avatar key={index} className="h-8 w-8 border-2 border-card">
+                <Avatar key={index} className="h-8 w-8 border-2 border-card shadow-sm">
                   <AvatarImage src={attendee.avatar} />
                   <AvatarFallback className="bg-primary text-primary-foreground text-xs">
                     {attendee.name.charAt(0)}

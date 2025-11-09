@@ -20,7 +20,7 @@ export const Header = () => {
           />
         </Link>
 
-        <h1 className="text-xl sm:text-2xl font-extrabold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">
+        <h1 className="text-2xl sm:text-3xl md:text-4xl leading-none tracking-wide font-extrabold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">
           <Link to="/" className="inline-block">CAPS</Link>
         </h1>
 

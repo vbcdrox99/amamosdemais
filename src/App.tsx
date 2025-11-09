@@ -28,32 +28,46 @@ const queryClient = new QueryClient();
 // Indicador de status de autenticação simplificado
 const AuthStatus = () => null;
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <div className="min-h-screen bg-background">
-          <Header />
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/evento/:id" element={<EventDetails />} />
-            <Route path="/criar" element={<RouteGuard minLevel={2}><CreateEvent /></RouteGuard>} />
-            <Route path="/enquetes" element={<RouteGuard minLevel={2}><Polls /></RouteGuard>} />
-            <Route path="/memorias" element={<Memories />} />
-            <Route path="/perfil" element={<RouteGuard minLevel={1}><Profile /></RouteGuard>} />
-            <Route path="/admin" element={<RouteGuard minLevel={3}><Admin /></RouteGuard>} />
-            <Route path="/auth" element={<Auth />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-          {/* Sem indicador de conexão */}
-          <AuthStatus />
-          <BottomNav />
-        </div>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+const App = () => {
+  const envOk = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <div className="min-h-screen bg-background">
+            <Header />
+            {!envOk && (
+              <div className="px-4 pt-16 pb-20 max-w-2xl mx-auto">
+                <div className="rounded-xl border border-yellow-500/50 bg-yellow-500/10 p-4 text-yellow-200">
+                  <div className="font-semibold mb-1">Configuração do Supabase ausente</div>
+                  <div className="text-sm">
+                    Adicione `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` no arquivo `.env.local` na raiz do projeto.
+                    Após configurar, reinicie o servidor de desenvolvimento.
+                  </div>
+                </div>
+              </div>
+            )}
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/evento/:id" element={<EventDetails />} />
+              <Route path="/criar" element={<RouteGuard minLevel={2}><CreateEvent /></RouteGuard>} />
+              <Route path="/enquetes" element={<RouteGuard minLevel={2}><Polls /></RouteGuard>} />
+              <Route path="/memorias" element={<Memories />} />
+              <Route path="/perfil" element={<RouteGuard minLevel={1}><Profile /></RouteGuard>} />
+              <Route path="/admin" element={<RouteGuard minLevel={3}><Admin /></RouteGuard>} />
+              <Route path="/auth" element={<Auth />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+            {/* Sem indicador de conexão */}
+            <AuthStatus />
+            <BottomNav />
+          </div>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
+};
 
 export default App;

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuthRole } from "@/hooks/useAuthRole";
 import { formatPhoneBR } from "@/lib/utils";
+import ProfileQuickView from "@/components/profile/ProfileQuickView";
 
 const Admin = () => {
   const { toast } = useToast();
@@ -13,6 +14,8 @@ const Admin = () => {
   const [profiles, setProfiles] = useState<Array<{ id: string; email: string | null; phone_number: string | null; full_name: string | null; is_approved: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [profileViewOpen, setProfileViewOpen] = useState(false);
+  const [profileViewUserId, setProfileViewUserId] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -92,12 +95,19 @@ const Admin = () => {
                 <div className="space-y-2 mt-2">
                   {approved.map((u) => (
                     <div key={u.id} className="flex items-center justify-between rounded-md border border-border p-3">
-                      <div>
+                      <button
+                        type="button"
+                        className="text-left"
+                        onClick={() => {
+                          setProfileViewUserId(u.id);
+                          setProfileViewOpen(true);
+                        }}
+                      >
                         <div className="text-sm font-semibold text-foreground">{formatPhoneBR(u.phone_number || "")}</div>
                         {u.full_name && (
                           <div className="text-xs text-muted-foreground">{u.full_name}</div>
                         )}
-                      </div>
+                      </button>
                       <div className="flex gap-2" />
                     </div>
                   ))}
@@ -113,12 +123,19 @@ const Admin = () => {
                 <div className="space-y-2 mt-2">
                   {pending.map((u) => (
                     <div key={u.id} className="flex items-center justify-between rounded-md border border-border p-3">
-                      <div>
+                      <button
+                        type="button"
+                        className="text-left"
+                        onClick={() => {
+                          setProfileViewUserId(u.id);
+                          setProfileViewOpen(true);
+                        }}
+                      >
                         <div className="text-sm font-semibold text-foreground">{formatPhoneBR(u.phone_number || "")}</div>
                         {u.full_name && (
                           <div className="text-xs text-muted-foreground">{u.full_name}</div>
                         )}
-                      </div>
+                      </button>
                       <div className="flex gap-2">
                         <Button onClick={() => handleApprove(u.id)}>Aprovar</Button>
                       </div>
@@ -132,6 +149,7 @@ const Admin = () => {
       </Card>
 
       <p className="text-xs text-muted-foreground mt-3">Nota: ações de edição/banimento podem ser adicionadas depois.</p>
+      <ProfileQuickView userId={profileViewUserId} open={profileViewOpen} onOpenChange={setProfileViewOpen} />
     </div>
   );
 };
