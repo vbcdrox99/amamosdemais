@@ -17,6 +17,8 @@ import { useAuthRole } from "@/hooks/useAuthRole";
 import { supabase } from "@/lib/supabase";
 import { formatPhoneBR } from "@/lib/utils";
 
+const EVENT_COVER_BUCKET = "event-covers";
+
 type RsvpStatus = "going" | "maybe" | "not-going" | null;
 
 const EventDetails = () => {
@@ -170,8 +172,6 @@ const EventDetails = () => {
         bc.close();
       } catch {}
       toast({ title: "Presença atualizada" });
-      // Navega para a Home para refletir imediatamente na lista
-      try { navigate("/"); } catch {}
       // Atualiza a lista de participantes após mudança de RSVP
       loadParticipants();
     } catch (e: any) {
@@ -272,6 +272,20 @@ const EventDetails = () => {
   const [addHour, setAddHour] = useState<string | null>(null);
   const [addMinute, setAddMinute] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const canChooseArrival = flags.isAuthenticated && isArrivalEditable && rsvpStatus !== "not-going";
+
+  const isCreator = useMemo(() => {
+    try {
+      return !!event?.created_by && !!profile?.id && event!.created_by === profile!.id;
+    } catch {
+      return false;
+    }
+  }, [event?.created_by, profile?.id]);
+
+  const myRsvp = useMemo(() => {
+    if (!profile?.id) return null;
+    return participants.find((p) => p.user_id === profile.id) ?? null;
+  }, [participants, profile?.id]);
 
   const setArrivalTime = async (label: string | null) => {
     try {
@@ -292,6 +306,30 @@ const EventDetails = () => {
       toast({ title: "Erro ao marcar horário", description: e?.message ?? String(e), variant: "destructive" });
     }
   };
+
+  // Regra: criador do evento automaticamente fica como VOU e com horário fixado
+  useEffect(() => {
+    const applyCreatorDefaults = async () => {
+      if (!isCreator || !fixedTimeLabel || !profile?.id || !id) return;
+      const needsStatus = rsvpStatus !== "going";
+      const needsArrival = (myRsvp?.arrival_time || "") !== fixedTimeLabel;
+      if (!needsStatus && !needsArrival) return;
+      try {
+        const { error } = await supabase
+          .from("event_rsvps")
+          .upsert({
+            event_id: Number(id),
+            user_id: profile.id,
+            status: "going",
+            arrival_time: fixedTimeLabel,
+          }, { onConflict: "event_id,user_id" });
+        if (error) throw error;
+        setRsvpStatus("going");
+        await loadParticipants();
+      } catch {}
+    };
+    applyCreatorDefaults();
+  }, [isCreator, fixedTimeLabel, rsvpStatus, myRsvp?.arrival_time, profile?.id, id]);
 
   // Assina mudanças em tempo real para atualizar os grupos de horários
   useEffect(() => {
@@ -369,7 +407,6 @@ const EventDetails = () => {
   };
 
   // Edição de data/horário
-  const isCreator = !!profile?.id && !!event?.created_by && profile.id === event.created_by;
   const isAdmin = !!permissions?.canAccessAdmin;
   const canEditTimeOnly = isCreator && !isAdmin;
   const canEditDateTime = isAdmin;
@@ -377,6 +414,64 @@ const EventDetails = () => {
   const [newDate, setNewDate] = useState<string>("");
   const [newTime, setNewTime] = useState<string>("");
   const [savingEvent, setSavingEvent] = useState(false);
+
+  // Foto do evento (criador e admin podem editar/adicionar)
+  const canEditCover = isCreator || isAdmin;
+  const [coverDialogOpen, setCoverDialogOpen] = useState(false);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
+  const [savingCover, setSavingCover] = useState(false);
+
+  const handleChooseCover = (file: File) => {
+    setCoverFile(file);
+    try {
+      const reader = new FileReader();
+      reader.onload = () => setCoverPreviewUrl((reader.result as string) ?? null);
+      reader.onerror = () => {
+        setCoverPreviewUrl(null);
+        toast({ title: "Erro ao ler imagem", description: "Tente novamente.", variant: "destructive" });
+      };
+      reader.readAsDataURL(file);
+    } catch {}
+  };
+
+  const handleSaveCover = async () => {
+    if (!id) return;
+    if (!coverFile) {
+      toast({ title: "Selecione uma imagem", description: "Escolha um arquivo para enviar." });
+      return;
+    }
+    setSavingCover(true);
+    try {
+      const ext = (coverFile.name.split(".").pop() || "jpeg").toLowerCase();
+      const path = `${id}/${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from(EVENT_COVER_BUCKET)
+        .upload(path, coverFile, { upsert: false, contentType: coverFile.type });
+      if (uploadError) throw uploadError;
+
+      const { data: publicData } = await supabase.storage
+        .from(EVENT_COVER_BUCKET)
+        .getPublicUrl(path);
+      const publicUrl = publicData.publicUrl;
+
+      const { error } = await supabase
+        .from("events")
+        .update({ cover_image_url: publicUrl })
+        .eq("id", Number(id));
+      if (error) throw error;
+
+      setEvent((prev) => (prev ? { ...prev, cover_image_url: publicUrl } : prev));
+      setCoverDialogOpen(false);
+      setCoverFile(null);
+      setCoverPreviewUrl(null);
+      toast({ title: "Foto atualizada", description: "A capa do evento foi atualizada." });
+    } catch (e: any) {
+      toast({ title: "Erro ao salvar foto", description: e?.message ?? String(e), variant: "destructive" });
+    } finally {
+      setSavingCover(false);
+    }
+  };
 
   useEffect(() => {
     if (event?.event_timestamp) {
@@ -567,6 +662,48 @@ const EventDetails = () => {
           className="w-full h-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+        {canEditCover && (
+          <Dialog open={coverDialogOpen} onOpenChange={setCoverDialogOpen}>
+            <DialogTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="absolute top-3 right-3 bg-black/50 border-white/30 text-white hover:bg-black/70"
+              >
+                {event?.cover_image_url ? "Editar foto" : "Adicionar foto"}
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{event?.cover_image_url ? "Editar foto do evento" : "Adicionar foto do evento"}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                {coverPreviewUrl ? (
+                  <img src={coverPreviewUrl} alt="Prévia" className="w-full h-40 object-cover rounded-md" />
+                ) : (
+                  <img src={event?.cover_image_url ?? "/placeholder.svg"} alt="Atual" className="w-full h-40 object-cover rounded-md" />
+                )}
+                <div className="space-y-2">
+                  <Label>Imagem</Label>
+                  <Input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleChooseCover(f);
+                    }}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setCoverDialogOpen(false)}>Cancelar</Button>
+                <Button onClick={handleSaveCover} disabled={savingCover || !coverFile}>
+                  {savingCover ? "Salvando..." : "Salvar"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
         {(() => {
           const hotCount = participants.filter(p => p.status === "going" || p.status === "maybe").length;
           if (hotCount >= 6) {
@@ -665,136 +802,7 @@ const EventDetails = () => {
             )}
           </Card>
 
-          {/* Chegarei às: */}
-          <Card className="p-4 space-y-3 bg-card border-border" role="region" aria-label="Seleção de horários de chegada">
-            <h3 className="font-semibold text-foreground">Chegarei às:</h3>
-            <div className="flex flex-wrap gap-3" role="group" aria-label="Horários disponíveis">
-              {fixedTimeLabel && (
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm bg-white/5 hover:bg-white/10 border border-white/20"
-                  onClick={() => setArrivalTime(fixedTimeLabel)}
-                  disabled={!flags.isAuthenticated || !isArrivalEditable}
-                  aria-label={`Marcar chegada às ${fixedTimeLabel} (horário fixado)`}
-               >
-                  <span className="font-medium">{fixedTimeLabel}</span>
-                  <div className="flex -space-x-2" aria-hidden="true">
-                    {(arrivalGroups.get(fixedTimeLabel) ?? []).slice(0, 4).map((p) => {
-                      const name = p.full_name || formatPhoneBR(p.phone_number || "");
-                      const initials = (name || "?").slice(0, 2).toUpperCase();
-                      return (
-                        <Avatar key={`fx-${p.user_id}`} className="h-6 w-6 ring-[2px] ring-emerald-400/50">
-                          {p.avatar_url ? <AvatarImage src={p.avatar_url} alt={name} /> : <AvatarImage src={undefined} alt={name} />}
-                          <AvatarFallback className="text-[10px] bg-white/10 text-foreground">{initials}</AvatarFallback>
-                        </Avatar>
-                      );
-                    })}
-                  </div>
-                </button>
-              )}
-
-              {Array.from(arrivalGroups.entries())
-                .filter(([label]) => label !== fixedTimeLabel)
-                .map(([label, users]) => (
-                  <button
-                    key={`slot-${label}`}
-                    type="button"
-                  className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm bg-white/5 hover:bg-white/10 border border-white/20"
-                  onClick={() => setArrivalTime(label)}
-                  disabled={!flags.isAuthenticated || !isArrivalEditable}
-                  aria-label={`Marcar chegada às ${label}`}
-                >
-                  <span className="font-medium">{label}</span>
-                  <div className="flex -space-x-2" aria-hidden="true">
-                    {users.slice(0, 4).map((p) => {
-                      const name = p.full_name || formatPhoneBR(p.phone_number || "");
-                      const initials = (name || "?").slice(0, 2).toUpperCase();
-                      return (
-                        <Avatar key={`${label}-${p.user_id}`} className="h-6 w-6 ring-[2px] ring-amber-400/50">
-                          {p.avatar_url ? <AvatarImage src={p.avatar_url} alt={name} /> : <AvatarImage src={undefined} alt={name} />}
-                          <AvatarFallback className="text-[10px] bg-white/10 text-foreground">{initials}</AvatarFallback>
-                        </Avatar>
-                      );
-                    })}
-                  </div>
-                </button>
-              ))}
-
-              {/* Adicionar novo horário (incrementos de 30 min) */}
-              <Popover open={addOpen} onOpenChange={setAddOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-8 px-3" aria-label="Adicionar novo horário de chegada" disabled={!flags.isAuthenticated || !isArrivalEditable}>+ Adicionar horário</Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[240px] bg-black/90 border-white/20">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-white/80">Hora</Label>
-                      <Select value={addHour ?? undefined} onValueChange={(v) => setAddHour(v)}>
-                        <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
-                          <SelectValue placeholder="HH" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Array.from({ length: 24 }).map((_, i) => {
-                            const hh = String(i).padStart(2, "0");
-                            return <SelectItem key={hh} value={hh}>{hh}</SelectItem>;
-                          })}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="text-white/80">Minuto</Label>
-                      <Select value={addMinute ?? undefined} onValueChange={(v) => setAddMinute(v)}>
-                        <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
-                          <SelectValue placeholder="MM" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {[0, 30].map((i) => {
-                            const mm = String(i).padStart(2, "0");
-                            return <SelectItem key={mm} value={mm}>{mm}</SelectItem>;
-                          })}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex justify-end gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => setAddOpen(false)}>Cancelar</Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        const label = addHour && addMinute ? `${addHour}:${addMinute}` : "";
-                        if (!label) return;
-                        await setArrivalTime(label);
-                        setAddOpen(false);
-                        setAddHour(null);
-                        setAddMinute(null);
-                      }}
-                      disabled={!flags.isAuthenticated || !isArrivalEditable}
-                    >
-                      Salvar
-                    </Button>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {/* Remover meu horário */}
-            <div className="pt-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-white/70"
-                onClick={() => setArrivalTime(null)}
-                disabled={!flags.isAuthenticated || !isArrivalEditable}
-                aria-label="Remover meu horário de chegada"
-              >
-                Remover meu horário
-              </Button>
-              {!isArrivalEditable && (
-                <p className="mt-2 text-xs text-white/60">Edição de horário bloqueada. O evento já virou memória.</p>
-              )}
-            </div>
-          </Card>
+          
 
           {/* Description */}
           <div className="space-y-2">
@@ -915,6 +923,140 @@ const EventDetails = () => {
             </div>
           )}
 
+          {/* Chegarei às — agora abaixo de “Você vai?” */}
+          <Card className="p-4 space-y-3 bg-card border-border" role="region" aria-label="Seleção de horários de chegada">
+            <h3 className="font-semibold text-foreground">Chegarei às:</h3>
+            {rsvpStatus === "not-going" && (
+              <p className="text-xs text-white/60">Você marcou NÃO VOU; votação de horários está bloqueada.</p>
+            )}
+            <div className="flex flex-wrap gap-3" role="group" aria-label="Horários disponíveis">
+              {fixedTimeLabel && (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm bg-white/5 hover:bg-white/10 border border-white/20"
+                  onClick={() => setArrivalTime(fixedTimeLabel)}
+                  disabled={!canChooseArrival}
+                  aria-label={`Marcar chegada às ${fixedTimeLabel} (horário fixado)`}
+                >
+                  <span className="font-medium">{fixedTimeLabel}</span>
+                  <div className="flex -space-x-2" aria-hidden="true">
+                    {(arrivalGroups.get(fixedTimeLabel) ?? []).slice(0, 4).map((p) => {
+                      const name = p.full_name || formatPhoneBR(p.phone_number || "");
+                      const initials = (name || "?").slice(0, 2).toUpperCase();
+                      return (
+                        <Avatar key={`fx-${p.user_id}`} className="h-6 w-6 ring-[2px] ring-emerald-400/50">
+                          {p.avatar_url ? <AvatarImage src={p.avatar_url} alt={name} /> : <AvatarImage src={undefined} alt={name} />}
+                          <AvatarFallback className="text-[10px] bg-white/10 text-foreground">{initials}</AvatarFallback>
+                        </Avatar>
+                      );
+                    })}
+                  </div>
+                </button>
+              )}
+
+              {Array.from(arrivalGroups.entries())
+                .filter(([label]) => label !== fixedTimeLabel)
+                .map(([label, users]) => (
+                  <button
+                    key={`slot-${label}`}
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm bg-white/5 hover:bg-white/10 border border-white/20"
+                    onClick={() => setArrivalTime(label)}
+                    disabled={!canChooseArrival}
+                    aria-label={`Marcar chegada às ${label}`}
+                  >
+                    <span className="font-medium">{label}</span>
+                    <div className="flex -space-x-2" aria-hidden="true">
+                      {users.slice(0, 4).map((p) => {
+                        const name = p.full_name || formatPhoneBR(p.phone_number || "");
+                        const initials = (name || "?").slice(0, 2).toUpperCase();
+                        return (
+                          <Avatar key={`${label}-${p.user_id}`} className="h-6 w-6 ring-[2px] ring-amber-400/50">
+                            {p.avatar_url ? <AvatarImage src={p.avatar_url} alt={name} /> : <AvatarImage src={undefined} alt={name} />}
+                            <AvatarFallback className="text-[10px] bg-white/10 text-foreground">{initials}</AvatarFallback>
+                          </Avatar>
+                        );
+                      })}
+                    </div>
+                  </button>
+                ))}
+
+              {/* Adicionar novo horário (incrementos de 30 min) */}
+              <Popover open={addOpen} onOpenChange={setAddOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 px-3" aria-label="Adicionar novo horário de chegada" disabled={!canChooseArrival}>+ Adicionar horário</Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[240px] bg-black/90 border-white/20">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-white/80">Hora</Label>
+                      <Select value={addHour ?? undefined} onValueChange={(v) => setAddHour(v)}>
+                        <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
+                          <SelectValue placeholder="HH" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 24 }).map((_, i) => {
+                            const hh = String(i).padStart(2, "0");
+                            return <SelectItem key={hh} value={hh}>{hh}</SelectItem>;
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-white/80">Minuto</Label>
+                      <Select value={addMinute ?? undefined} onValueChange={(v) => setAddMinute(v)}>
+                        <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
+                          <SelectValue placeholder="MM" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[0, 30].map((i) => {
+                            const mm = String(i).padStart(2, "0");
+                            return <SelectItem key={mm} value={mm}>{mm}</SelectItem>;
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex justify-end gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => setAddOpen(false)}>Cancelar</Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        const label = addHour && addMinute ? `${addHour}:${addMinute}` : "";
+                        if (!label) return;
+                        await setArrivalTime(label);
+                        setAddOpen(false);
+                        setAddHour(null);
+                        setAddMinute(null);
+                      }}
+                      disabled={!canChooseArrival}
+                    >
+                      Salvar
+                    </Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {/* Remover meu horário */}
+            <div className="pt-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-white/70"
+                onClick={() => setArrivalTime(null)}
+                disabled={!canChooseArrival}
+                aria-label="Remover meu horário de chegada"
+              >
+                Remover meu horário
+              </Button>
+            {!isArrivalEditable && (
+                <p className="mt-2 text-xs text-white/60">Edição de horário bloqueada. O evento já virou memória.</p>
+              )}
+            </div>
+          </Card>
+
           {/* Participantes */}
           <div className="space-y-3">
             <h3 className="font-semibold text-foreground">Participantes</h3>
@@ -983,6 +1125,7 @@ const EventDetails = () => {
                       <Card className="flex items-center gap-3 p-2 hover:border-primary/50 transition-colors">
                         <img
                           src={ev.cover_image_url ?? "/placeholder.svg"}
+                          onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }}
                           alt={ev.title}
                           className="h-16 w-24 object-cover rounded-md"
                         />

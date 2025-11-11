@@ -34,14 +34,16 @@ const App = () => {
   useEffect(() => {
     const removeLovable = () => {
       try {
-        // Remover por aria-label direto
         document.querySelectorAll('[aria-label="Edit with Lovable"]').forEach((el) => (el as HTMLElement).remove());
-        // Remover por texto visível
+        document.querySelectorAll('#lovable-badge, [id*="lovable-badge"], [class*="lovable-badge"], a[href*="lovable.dev"], a[href*="utm_source=lovable-badge"]').forEach((el) => (el as HTMLElement).remove());
         const all = Array.from(document.querySelectorAll<HTMLElement>('a,button,div,span'));
         all.forEach((el) => {
           const text = (el.innerText || el.textContent || "").trim();
-          if (/Edit with Lovable/i.test(text)) {
-            el.remove();
+          if (/Edit with Lovable/i.test(text)) el.remove();
+          if (/Lovable/i.test(text)) {
+            const anchor = el.closest('a');
+            const href = anchor?.getAttribute('href') || '';
+            if (/lovable\.dev|utm_source=lovable-badge/i.test(href)) (anchor as HTMLElement)?.remove();
           }
         });
       } catch {}

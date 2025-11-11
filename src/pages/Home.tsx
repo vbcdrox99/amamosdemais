@@ -21,7 +21,7 @@ type EventRow = {
 };
 
 type PollOption = { id: string; text: string; position: number; votes: number };
-type Poll = { id: string; question: string; options: PollOption[]; totalVotes: number; createdAt: string };
+type Poll = { id: string; question: string; options: PollOption[]; totalVotes: number; createdAt: string; expiresAt?: string };
 
 // Para ordenação por proximidade da data atual, usamos score = -|data - agora|
 type FeedEventItem = { key: string; type: "event"; data: EventRow; score: number };
@@ -35,12 +35,14 @@ const Home = () => {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const [pollLoading, setPollLoading] = useState(false);
-  const [poll, setPoll] = useState<Poll | null>(null);
+  const [polls, setPolls] = useState<Poll[]>([]);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const location = useLocation();
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [memoryBump, setMemoryBump] = useState<{ eventId: string; ts: number } | null>(null);
   const [memoryDialogId, setMemoryDialogId] = useState<string | null>(null);
+  // Contagem de participantes (going/maybe) por evento para evitar fetch por card
+  const [hotCounts, setHotCounts] = useState<Record<string, number>>({});
   // Bumps temporários por interação (duração limitada) para reforçar relevância
   const bumpsRef = useRef<Record<string, { rsvpUntil?: number; pollUntil?: number; memUntil?: number }>>({});
   const [pollBumpTs, setPollBumpTs] = useState<number | null>(null);
@@ -87,6 +89,30 @@ const Home = () => {
     };
     load();
   }, []);
+
+  // Carrega contagens de RSVPs (going/maybe) para os eventos exibidos
+  useEffect(() => {
+    const ids = events.map((e) => Number(e.id)).filter((n) => Number.isFinite(n));
+    if (ids.length === 0) { setHotCounts({}); return; }
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("event_rsvps")
+          .select("event_id,status")
+          .in("event_id", ids)
+          .in("status", ["going", "maybe"]);
+        if (error) throw error;
+        const map: Record<string, number> = {};
+        (data ?? []).forEach((row: any) => {
+          const key = String(row.event_id);
+          map[key] = (map[key] ?? 0) + 1;
+        });
+        setHotCounts(map);
+      } catch {
+        // mantém contagens anteriores em caso de falha
+      }
+    })();
+  }, [events]);
 
   // Escuta BroadcastChannel para bumps imediatos
   useEffect(() => {
@@ -171,6 +197,27 @@ const Home = () => {
         (payload: any) => {
           const eid = String(payload?.new?.event_id ?? payload?.old?.event_id ?? "");
           if (!eid) return;
+          // Atualiza contagem local: going/maybe
+          const oldStatus = payload?.old?.status as string | undefined;
+          const newStatus = payload?.new?.status as string | undefined;
+          const wasHot = oldStatus === "going" || oldStatus === "maybe";
+          const isHotNow = newStatus === "going" || newStatus === "maybe";
+          setHotCounts((prev) => {
+            const next = { ...prev };
+            const cur = next[eid] ?? 0;
+            if (payload?.old && payload?.new) {
+              // UPDATE
+              if (wasHot && !isHotNow) next[eid] = Math.max(0, cur - 1);
+              if (!wasHot && isHotNow) next[eid] = cur + 1;
+            } else if (payload?.new && !payload?.old) {
+              // INSERT
+              if (isHotNow) next[eid] = cur + 1;
+            } else if (payload?.old && !payload?.new) {
+              // DELETE
+              if (wasHot) next[eid] = Math.max(0, cur - 1);
+            }
+            return next;
+          });
           // marca bump temporário (5 min)
           const now = Date.now();
           bumpsRef.current[eid] = {
@@ -278,7 +325,34 @@ const Home = () => {
     };
   }, []);
 
-  // Assina votos em enquetes: ao votar, a enquete é atualizada e sobe
+  // Assina atualizações de eventos (ex.: capa atualizada) para refletir imediatamente na Home
+  useEffect(() => {
+    const channel = supabase
+      .channel("home-events-update")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "events" },
+        (payload: any) => {
+          const ev = payload?.new;
+          if (!ev?.id) return;
+          setEvents((prev) => {
+            const idx = prev.findIndex((e) => String(e.id) === String(ev.id));
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = ev as EventRow;
+              return next;
+            }
+            return prev;
+          });
+        }
+      );
+    channel.subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Assina votos em enquetes: ao votar, atualiza a enquete afetada
   useEffect(() => {
     const channel = supabase
       .channel("home-poll-votes")
@@ -289,31 +363,35 @@ const Home = () => {
           const pollId = payload?.new?.poll_id;
           if (!pollId) return;
           try {
-            // Se a enquete vigente é a afetada, recarrega opções e votos
-            if (poll?.id === pollId) {
-              const { data: optionRows } = await supabase
-                .from("poll_options")
-                .select("id, poll_id, text, position")
-                .eq("poll_id", pollId)
-                .order("position", { ascending: true });
-              const { data: voteRows } = await supabase
-                .from("poll_votes")
-                .select("option_id, poll_id")
-                .eq("poll_id", pollId);
-              const voteCountByOption = new Map<string, number>();
-              (voteRows ?? []).forEach((v: any) => {
-                voteCountByOption.set(v.option_id, (voteCountByOption.get(v.option_id) ?? 0) + 1);
-              });
-              const options: PollOption[] = (optionRows ?? []).map((o: any) => ({
-                id: o.id,
-                text: o.text,
-                position: o.position,
-                votes: voteCountByOption.get(o.id) ?? 0,
-              }));
-              const total = options.reduce((acc, cur) => acc + cur.votes, 0);
-              setPoll((prev) => prev && prev.id === pollId ? { id: prev.id, question: prev.question, options, totalVotes: total } : prev);
-              setPollBumpTs(Date.now());
-            }
+            const { data: optionRows } = await supabase
+              .from("poll_options")
+              .select("id, poll_id, text, position")
+              .eq("poll_id", pollId)
+              .order("position", { ascending: true });
+            const { data: voteRows } = await supabase
+              .from("poll_votes")
+              .select("option_id, poll_id")
+              .eq("poll_id", pollId);
+            const voteCountByOption = new Map<string, number>();
+            (voteRows ?? []).forEach((v: any) => {
+              voteCountByOption.set(v.option_id, (voteCountByOption.get(v.option_id) ?? 0) + 1);
+            });
+            const options: PollOption[] = (optionRows ?? []).map((o: any) => ({
+              id: o.id,
+              text: o.text,
+              position: o.position,
+              votes: voteCountByOption.get(o.id) ?? 0,
+            }));
+            const total = options.reduce((acc, cur) => acc + cur.votes, 0);
+            setPolls((prev) => {
+              const idx = prev.findIndex((p) => p.id === pollId);
+              if (idx < 0) return prev;
+              const next = [...prev];
+              const old = next[idx];
+              next[idx] = { ...old, options, totalVotes: total };
+              return next;
+            });
+            setPollBumpTs(Date.now());
           } catch {}
         }
       );
@@ -427,31 +505,31 @@ const Home = () => {
     return () => clearInterval(interval);
   }, [pinnedId]);
 
-  // Carregar enquete vigente (última criada) para exibição na Home
+  // Carregar todas enquetes não expiradas para exibição na Home
   useEffect(() => {
-    const loadPoll = async () => {
+    const loadPolls = async () => {
       setPollLoading(true);
-      // Seleciona a última enquete criada
+      const nowIso = new Date().toISOString();
       const { data: pollRows, error: pollErr } = await supabase
         .from("polls")
-        .select("id, question, created_at")
-        .order("created_at", { ascending: false })
-        .limit(1);
+        .select("id, question, created_at, expires_at")
+        .gt("expires_at", nowIso)
+        .order("created_at", { ascending: false });
       if (pollErr) {
-        toast({ title: "Falha ao carregar enquete", description: pollErr.message });
+        toast({ title: "Falha ao carregar enquetes", description: pollErr.message });
         setPollLoading(false);
         return;
       }
-      const selected = (pollRows ?? [])[0];
-      if (!selected) {
-        setPoll(null);
+      const ids = (pollRows ?? []).map((p: any) => p.id);
+      if (ids.length === 0) {
+        setPolls([]);
         setPollLoading(false);
         return;
       }
       const { data: optionRows, error: optErr } = await supabase
         .from("poll_options")
         .select("id, poll_id, text, position")
-        .eq("poll_id", selected.id)
+        .in("poll_id", ids)
         .order("position", { ascending: true });
       if (optErr) {
         toast({ title: "Falha ao carregar opções", description: optErr.message });
@@ -460,7 +538,8 @@ const Home = () => {
       }
       const { data: voteRows, error: voteErr } = await supabase
         .from("poll_votes")
-        .select("option_id, poll_id");
+        .select("option_id, poll_id")
+        .in("poll_id", ids);
       if (voteErr) {
         toast({ title: "Falha ao carregar votos", description: voteErr.message });
         setPollLoading(false);
@@ -470,17 +549,21 @@ const Home = () => {
       (voteRows ?? []).forEach((v: any) => {
         voteCountByOption.set(v.option_id, (voteCountByOption.get(v.option_id) ?? 0) + 1);
       });
-      const options: PollOption[] = (optionRows ?? []).map((o: any) => ({
-        id: o.id,
-        text: o.text,
-        position: o.position,
-        votes: voteCountByOption.get(o.id) ?? 0,
-      }));
-      const total = options.reduce((acc, cur) => acc + cur.votes, 0);
-      setPoll({ id: selected.id, question: selected.question, options, totalVotes: total, createdAt: selected.created_at });
+      const optionsByPoll = new Map<string, PollOption[]>();
+      (optionRows ?? []).forEach((o: any) => {
+        const list = optionsByPoll.get(o.poll_id) ?? [];
+        list.push({ id: o.id, text: o.text, position: o.position, votes: voteCountByOption.get(o.id) ?? 0 });
+        optionsByPoll.set(o.poll_id, list);
+      });
+      const finalPolls: Poll[] = (pollRows ?? []).map((p: any) => {
+        const opts = (optionsByPoll.get(p.id) ?? []).sort((a, b) => a.position - b.position);
+        const total = opts.reduce((acc, cur) => acc + cur.votes, 0);
+        return { id: p.id, question: p.question, options: opts, totalVotes: total, createdAt: p.created_at, expiresAt: p.expires_at };
+      });
+      setPolls(finalPolls);
       setPollLoading(false);
     };
-    loadPoll();
+    loadPolls();
   }, []);
 
   // Monta esteira unificada por proximidade da data atual (eventos, enquete, memória)
@@ -496,12 +579,12 @@ const Home = () => {
       items.push({ key: `event-${row.id}`, type: "event", data: row, score });
     }
 
-    // Enquete: usa createdAt para ordenação por proximidade
-    if (poll) {
-      const pts = poll.createdAt ? new Date(poll.createdAt).getTime() : Infinity;
+    // Enquetes: usa createdAt para ordenação por proximidade
+    for (const p of polls) {
+      const pts = p.createdAt ? new Date(p.createdAt).getTime() : Infinity;
       const pdiff = Math.abs(pts - now);
       const pscore = -pdiff;
-      items.push({ key: `poll-${poll.id}`, type: "poll", data: poll, score: pscore });
+      items.push({ key: `poll-${p.id}`, type: "poll", data: p, score: pscore });
     }
 
     // Memória: usa capa e data do último rolê finalizado com capa ou do evento sinalizado em memoryBump
@@ -540,7 +623,7 @@ const Home = () => {
     // Ordena por score desc (score = -distância => mais próximo fica primeiro)
     items.sort((a, b) => b.score - a.score);
     setFeed(items);
-  }, [events, poll, pinnedId, memoryBump]);
+  }, [events, polls, pinnedId, memoryBump]);
 
   // Esteira unificada por relevância é construída em efeitos acima
   return (
@@ -573,9 +656,9 @@ const Home = () => {
                     date={dateStr}
                     time={timeStr}
                     location={row.location_text ?? ""}
-                    coverImage={row.cover_image_url ?? "/placeholder.svg"}
+                    coverImage={(row.cover_image_url && row.cover_image_url.trim().length > 0) ? row.cover_image_url : "/placeholder.svg"}
                     attendees={[]}
-                    attendeeCount={0}
+                    attendeeCount={hotCounts[String(row.id)] ?? 0}
                     isPast={isPast}
                   />
                 </div>
@@ -592,10 +675,28 @@ const Home = () => {
                   role="button"
                   aria-label="Abrir área de enquetes"
                 >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-lg font-semibold text-white">Enquete: {p.question}</div>
-                    <Link to="/enquetes" className="text-xs text-sky-400 hover:underline">Ver enquete</Link>
+                  <div className="flex items-center gap-2 mb-3">
+                    <BarChart3 className="h-5 w-5 text-sky-400" aria-label="Enquete" />
+                    <div className="text-lg font-semibold text-white">{p.question}</div>
                   </div>
+                  {p.expiresAt && (
+                    <div className="text-xs text-white/60 mb-2">
+                      {(() => {
+                        const ms = new Date(p.expiresAt!).getTime() - Date.now();
+                        if (ms <= 0) return "expirada";
+                        const minutes = Math.floor(ms / 60000);
+                        if (minutes < 60) return `expira em ${minutes} min`;
+                        const hours = Math.floor(minutes / 60);
+                        const days = Math.floor(hours / 24);
+                        if (days >= 1) {
+                          const remHours = hours - days * 24;
+                          return remHours > 0 ? `expira em ${days}d ${remHours}h` : `expira em ${days}d`;
+                        }
+                        const remMin = minutes - hours * 60;
+                        return remMin > 0 ? `expira em ${hours}h ${remMin}m` : `expira em ${hours}h`;
+                      })()}
+                    </div>
+                  )}
                   <div className="space-y-3">
                     {p.options.map((o) => {
                       const pct = total > 0 ? Math.round((o.votes / total) * 100) : 0;
@@ -618,40 +719,7 @@ const Home = () => {
             if (item.type === "memory") {
               const data = item.data as { cover: string; eventId?: string };
               const cover = data.cover;
-              return (
-                <div
-                  key={item.key}
-                  className="block rounded-xl border border-white/10 bg-white/5 overflow-hidden cursor-pointer"
-                  onClick={() => {
-                    if (data.eventId) {
-                      setMemoryDialogId(String(data.eventId));
-                    } else {
-                      // fallback: pega o último evento passado com capa
-                      const now = Date.now();
-                      const past = [...events]
-                        .filter((e) => {
-                          const ts = e.event_timestamp ? new Date(e.event_timestamp).getTime() : null;
-                          return ts !== null ? ts < now : false;
-                        })
-                        .sort((a, b) => {
-                          const ta = a.event_timestamp ? new Date(a.event_timestamp).getTime() : -Infinity;
-                          const tb = b.event_timestamp ? new Date(b.event_timestamp).getTime() : -Infinity;
-                          return tb - ta;
-                        });
-                      const found = past.find((e) => !!e.cover_image_url);
-                      if (found) setMemoryDialogId(String(found.id));
-                    }
-                  }}
-                >
-                  <div className="p-3">
-                    <div className="text-white font-semibold mb-2">Memórias do rolê</div>
-                    <div className="rounded-lg overflow-hidden">
-                      <img src={cover} alt="Memória do rolê" className="w-full h-48 object-cover" />
-                    </div>
-                    <div className="mt-2 text-xs text-sky-400">Abrir memórias</div>
-                  </div>
-                </div>
-              );
+              return null;
             }
             return null;
           })}

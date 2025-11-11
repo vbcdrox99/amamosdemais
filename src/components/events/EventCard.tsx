@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Calendar, Clock, MapPin, Flame } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Link } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { Link, useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+// Supabase não é mais usado aqui; contagem vem da Home
 
 interface EventCardProps {
   id: string;
@@ -32,26 +33,8 @@ export const EventCard = ({
   attendeeCount,
   isPast = false,
 }: EventCardProps) => {
-  const [hotCount, setHotCount] = useState<number | null>(null);
-  const isHot = (hotCount ?? 0) >= 6;
-
-  useEffect(() => {
-    const fetchHotCount = async () => {
-      try {
-        const { count, error } = await supabase
-          .from("event_rsvps")
-          .select("id", { count: "exact", head: true })
-          .eq("event_id", Number(id))
-          .in("status", ["going", "maybe"]);
-        if (error) throw error;
-        setHotCount(count ?? 0);
-      } catch (e) {
-        // Silencioso: falha em contagem não deve quebrar o card
-        setHotCount(0);
-      }
-    };
-    fetchHotCount();
-  }, [id]);
+  const isHot = attendeeCount >= 6;
+  const navigate = useNavigate();
 
   return (
     <Link to={`/evento/${id}`}>
@@ -60,13 +43,14 @@ export const EventCard = ({
           <img
             src={coverImage}
             alt={title}
+            onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }}
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/25 to-transparent" />
           {isHot && (
             <div className="absolute top-3 left-3 flex items-center gap-1 px-2 py-1 rounded-full bg-amber-500/20 backdrop-blur-md ring-1 ring-amber-300/40 shadow-[0_0_12px_rgba(250,204,21,0.35)] text-amber-300 text-xs font-semibold">
               <Flame className="h-4 w-4" />
-              <span>{(hotCount ?? 6)}+ bombando</span>
+              <span>{attendeeCount}+ bombando</span>
             </div>
           )}
           <div
@@ -108,9 +92,24 @@ export const EventCard = ({
                 </Avatar>
               ))}
             </div>
-            <span className="text-sm font-medium text-foreground">
-              +{attendeeCount} confirmados
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">
+                +{attendeeCount} confirmados
+              </span>
+              {isPast && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    navigate(`/memorias?eventId=${id}`);
+                  }}
+                >
+                  Abrir memórias
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </Card>

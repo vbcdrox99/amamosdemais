@@ -324,7 +324,7 @@ const Memories = () => {
               <Fragment key={ev.id}>
               <Card className="overflow-hidden bg-card border-border">
                 <div className="relative aspect-video" onClick={() => setEventDialogId(ev.id)} role="button" aria-label={`Abrir detalhes de ${ev.title}`}>
-                  <img src={ev.cover_image_url ?? "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=1200&q=80"} alt={ev.title} className="w-full h-full object-cover" />
+                  <img src={ev.cover_image_url ?? "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=1200&q=80"} alt={ev.title} onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }} className="w-full h-full object-cover" />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
                   <div className="absolute top-3 right-3 px-3 py-2 rounded-lg bg-gradient-to-br from-emerald-600 to-sky-600 text-white shadow-md">
                     <div className="text-xs opacity-80">Data</div>
@@ -491,6 +491,7 @@ const Memories = () => {
                     <div className="relative aspect-video rounded-lg overflow-hidden">
                       <img
                         src={ev.cover_image_url ?? "/placeholder.svg"}
+                        onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }}
                         alt={ev.title}
                         className="w-full h-full object-cover"
                       />

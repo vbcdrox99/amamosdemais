@@ -15,9 +15,12 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuthRole } from "@/hooks/useAuthRole";
 import { supabase } from "@/lib/supabase";
 
+const EVENT_COVER_BUCKET = "event-covers";
+
 const CreateEvent = () => {
   const navigate = useNavigate();
   const [coverImage, setCoverImage] = useState<string | null>(null);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
   const [eventName, setEventName] = useState("");
   const [locationName, setLocationName] = useState("");
   const [instagramUrl, setInstagramUrl] = useState("");
@@ -63,6 +66,7 @@ const CreateEvent = () => {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setCoverFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
         setCoverImage(reader.result as string);
@@ -99,7 +103,29 @@ const CreateEvent = () => {
         const auxLinks = formData.get("aux_links") as string | null;
         const date = formData.get("date") as string | null;
         const time = formData.get("time") as string | null;
-      
+
+        // Validações obrigatórias
+        if (!eventName || !eventName.trim()) {
+          toast({ title: "Informe o nome do rolê", description: "O título é obrigatório." });
+          return;
+        }
+        if (!locationName || !locationName.trim()) {
+          toast({ title: "Informe o local do rolê", description: "O local é obrigatório." });
+          return;
+        }
+        if (!date) {
+          toast({ title: "Informe a data", description: "Data é obrigatória." });
+          return;
+        }
+        if (!time) {
+          toast({ title: "Informe o horário", description: "Horário é obrigatório." });
+          return;
+        }
+        if (!coverFile) {
+          toast({ title: "Foto de capa obrigatória", description: "Adicione uma imagem de capa para publicar o rolê." });
+          return;
+        }
+
         if (limitEnabled) {
           const min = typeof minParticipants === "number" ? minParticipants : undefined;
           const max = typeof maxParticipants === "number" ? maxParticipants : undefined;
@@ -112,7 +138,7 @@ const CreateEvent = () => {
             return;
           }
         }
-      
+
         // Converte data e hora para timestamptz
         let eventTimestamp: string | null = null;
         if (date && time) {
@@ -120,9 +146,22 @@ const CreateEvent = () => {
           eventTimestamp = iso;
         }
 
-        // Validação simples
-        if (!eventName) {
-          toast({ title: "Informe o nome do rolê", description: "O título é obrigatório." });
+        // Faz upload da capa no Storage e obtém URL pública
+        let coverPublicUrl: string | null = null;
+        try {
+          const ext = (coverFile.name.split(".").pop() || "jpeg").toLowerCase();
+          const owner = profile?.id ? String(profile.id) : "anon";
+          const path = `${owner}/${Date.now()}.${ext}`;
+          const { error: uploadError } = await supabase.storage
+            .from(EVENT_COVER_BUCKET)
+            .upload(path, coverFile, { upsert: false, contentType: coverFile.type });
+          if (uploadError) throw uploadError;
+          const { data: publicData } = await supabase.storage
+            .from(EVENT_COVER_BUCKET)
+            .getPublicUrl(path);
+          coverPublicUrl = publicData.publicUrl;
+        } catch (err: any) {
+          toast({ title: "Erro ao enviar capa", description: err?.message ?? String(err), variant: "destructive" });
           return;
         }
 
@@ -132,7 +171,7 @@ const CreateEvent = () => {
           description,
           requirements: requirements || null,
           aux_links: auxLinks || null,
-          cover_image_url: coverImage ?? null,
+          cover_image_url: coverPublicUrl,
           event_timestamp: eventTimestamp,
           location_text: locationName || null,
           instagram_url: instagramUrl || null,
@@ -161,7 +200,7 @@ const CreateEvent = () => {
                   variant="outline"
                   size="sm"
                   className="absolute bottom-3 right-3 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
-                  onClick={() => setCoverImage(null)}
+                  onClick={() => { setCoverImage(null); setCoverFile(null); }}
                 >
                   Remover
                 </Button>
@@ -179,10 +218,10 @@ const CreateEvent = () => {
           </Card>
         </div>
 
-        {/* Nome do Rolê com sugestões e campos acima */}
+        {/* Nome e Local do Rolê com sugestões e campos acima */}
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="name" className="text-white">Nome do Rolê</Label>
+            <Label htmlFor="name" className="text-white">Nome e Local do Rolê</Label>
             <div className="relative">
               <Input
                 id="name"
@@ -355,94 +394,96 @@ const CreateEvent = () => {
           <div className="text-xs text-white/50">Aceita múltiplos links; serão salvos como texto.</div>
         </div>
 
-        {/* Date and Time */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="date" className="text-white">Data</Label>
-            {/* Input oculto para enviar a data em yyyy-MM-dd via FormData */}
-            <input type="hidden" name="date" value={selectedDate ? format(selectedDate, "yyyy-MM-dd") : ""} />
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full justify-start bg-white/10 border-white/20 text-white hover:bg-white/10"
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {selectedDate ? format(selectedDate, "dd/MM/yyyy", { locale: ptBR }) : "Selecione a data"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-full sm:w-auto max-w-[calc(100vw-2rem)] p-0 bg-black/90 border-white/20">
-                <Calendar
-                  mode="single"
-                  selected={selectedDate ?? undefined}
-                  onSelect={(date) => setSelectedDate(date ?? null)}
-                  locale={ptBR}
-                  className="text-white"
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="time" className="text-white">Horário</Label>
-            {/* Input oculto para enviar o horário em HH:mm via FormData */}
-            <input type="hidden" name="time" value={selectedTimeStr} />
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full justify-start bg-white/10 border-white/20 text-white hover:bg-white/10"
-                >
-                  <ClockIcon className="mr-2 h-4 w-4" />
-                  {selectedTimeStr ? selectedTimeStr : "Selecione o horário"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-full sm:w-[260px] max-w-[calc(100vw-2rem)] bg-black/90 border-white/20">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-white/80">Hora</Label>
-                    <Select value={selectedHour ?? undefined} onValueChange={(v) => setSelectedHour(v)}>
-                      <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
-                        <SelectValue placeholder="HH" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Array.from({ length: 24 }).map((_, i) => {
-                          const hh = String(i).padStart(2, "0");
-                          return (
-                            <SelectItem key={hh} value={hh}>{hh}</SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-white/80">Minuto</Label>
-                    <Select value={selectedMinute ?? undefined} onValueChange={(v) => setSelectedMinute(v)}>
-                      <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
-                        <SelectValue placeholder="MM" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[0, 15, 30, 45].map((i) => {
-                          const mm = String(i).padStart(2, "0");
-                          return (
-                            <SelectItem key={mm} value={mm}>{mm}</SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
-
         <Card className="bg-white/5 border-white/20">
           <div className="p-4 space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">Detalhes do Rolê</h2>
               <span className="text-xs text-white/60">Defina limites e localização</span>
+            </div>
+
+            <div className="h-px bg-white/10" />
+
+            {/* Data e Horário dentro de Detalhes do Rolê */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="date" className="text-white">Data</Label>
+                {/* Input oculto para enviar a data em yyyy-MM-dd via FormData */}
+                <input type="hidden" name="date" value={selectedDate ? format(selectedDate, "yyyy-MM-dd") : ""} />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-start bg-white/10 border-white/20 text-white hover:bg-white/10"
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {selectedDate ? format(selectedDate, "dd/MM/yyyy", { locale: ptBR }) : "Selecione a data"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-full sm:w-auto max-w-[calc(100vw-2rem)] p-0 bg-black/90 border-white/20">
+                    <Calendar
+                      mode="single"
+                      selected={selectedDate ?? undefined}
+                      onSelect={(date) => setSelectedDate(date ?? null)}
+                      locale={ptBR}
+                      className="text-white"
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="time" className="text-white">Horário</Label>
+                {/* Input oculto para enviar o horário em HH:mm via FormData */}
+                <input type="hidden" name="time" value={selectedTimeStr} />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-start bg-white/10 border-white/20 text-white hover:bg-white/10"
+                    >
+                      <ClockIcon className="mr-2 h-4 w-4" />
+                      {selectedTimeStr ? selectedTimeStr : "Selecione o horário"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-full sm:w-[260px] max-w-[calc(100vw-2rem)] bg-black/90 border-white/20">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-white/80">Hora</Label>
+                        <Select value={selectedHour ?? undefined} onValueChange={(v) => setSelectedHour(v)}>
+                          <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
+                            <SelectValue placeholder="HH" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Array.from({ length: 24 }).map((_, i) => {
+                              const hh = String(i).padStart(2, "0");
+                              return (
+                                <SelectItem key={hh} value={hh}>{hh}</SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-white/80">Minuto</Label>
+                        <Select value={selectedMinute ?? undefined} onValueChange={(v) => setSelectedMinute(v)}>
+                          <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
+                            <SelectValue placeholder="MM" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[0, 15, 30, 45].map((i) => {
+                              const mm = String(i).padStart(2, "0");
+                              return (
+                                <SelectItem key={mm} value={mm}>{mm}</SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
 
             <div className="h-px bg-white/10" />
