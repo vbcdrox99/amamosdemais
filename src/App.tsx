@@ -16,7 +16,7 @@ import Auth from "./pages/Auth";
 import Admin from "./pages/Admin";
 import Profile from "./pages/Profile";
 // Editar Perfil removido
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 // Conexão com banco removida
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { useAuthRole } from "@/hooks/useAuthRole";
@@ -30,6 +30,28 @@ const AuthStatus = () => null;
 
 const App = () => {
   const envOk = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+  // Remover overlays/elementos externos "Edit with Lovable" caso sejam injetados pelo navegador/terceiros
+  useEffect(() => {
+    const removeLovable = () => {
+      try {
+        // Remover por aria-label direto
+        document.querySelectorAll('[aria-label="Edit with Lovable"]').forEach((el) => (el as HTMLElement).remove());
+        // Remover por texto visível
+        const all = Array.from(document.querySelectorAll<HTMLElement>('a,button,div,span'));
+        all.forEach((el) => {
+          const text = (el.innerText || el.textContent || "").trim();
+          if (/Edit with Lovable/i.test(text)) {
+            el.remove();
+          }
+        });
+      } catch {}
+    };
+    // Execução imediata e observador para futuras inserções
+    removeLovable();
+    const observer = new MutationObserver(() => removeLovable());
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>

@@ -8,8 +8,8 @@ import { Label } from "@/components/ui/label";
 import { useAuthRole } from "@/hooks/useAuthRole";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
-import { Star } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Star, Share2, Copy } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 type EventRow = {
   id: string;
@@ -33,6 +33,7 @@ const Memories = () => {
   const [sampleExpanded, setSampleExpanded] = useState(false);
   const [sampleDialogOpen, setSampleDialogOpen] = useState(false);
   const [eventDialogId, setEventDialogId] = useState<string | null>(null);
+  const [shareDialogEventId, setShareDialogEventId] = useState<string | null>(null);
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
@@ -349,11 +350,68 @@ const Memories = () => {
                     <span className="px-2 py-1 rounded bg-white/5">Fotos: —</span>
                     <span className="px-2 py-1 rounded bg-white/5">Comentários: —</span>
                   </div>
-                  <div className="flex justify-end">
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShareDialogEventId(ev.id)}
+                      className="inline-flex items-center gap-2"
+                      aria-label="Compartilhar Memória"
+                    >
+                      <Share2 className="h-4 w-4" /> Compartilhar Memória
+                    </Button>
                     <Button variant="secondary" size="sm" onClick={() => setEventDialogId(ev.id)}>
                       Ver mais
                     </Button>
                   </div>
+
+                  {/* Diálogo de Compartilhar (fora do modal de detalhes) */}
+                  <Dialog open={shareDialogEventId === ev.id} onOpenChange={(open) => setShareDialogEventId(open ? ev.id : null)}>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Compartilhar Memória</DialogTitle>
+                        <DialogDescription>
+                          Texto de convite para compartilhar fotos, comentários e ver a memória.
+                        </DialogDescription>
+                      </DialogHeader>
+                      {(() => {
+                        const memUrl = `${window.location.origin}/memorias?eventId=${ev.id}`;
+                        const shareText = `Memória do rolê: ${ev.title} — ${dateStr}${timeStr ? ` • ${timeStr}` : ""}\n\nEntre para compartilhar suas fotos, comentários e ver a memória:\n${memUrl}`;
+                        const handleCopy = async () => {
+                          try {
+                            await navigator.clipboard.writeText(shareText);
+                            toast({ title: "Texto copiado!", description: "Convite com link da memória copiado." });
+                          } catch (e: any) {
+                            toast({ title: "Falha ao copiar", description: e?.message ?? String(e), variant: "destructive" });
+                          }
+                        };
+                        const handleOpenWhatsApp = () => {
+                          try {
+                            const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+                            const text = encodeURIComponent(shareText);
+                            const waUrl = isMobile ? `whatsapp://send?text=${text}` : `https://wa.me/?text=${text}`;
+                            window.open(waUrl, "_blank");
+                            toast({ title: isMobile ? "Abrindo WhatsApp" : "Abrindo WhatsApp Web", description: "Seu convite será colado na conversa." });
+                          } catch (e: any) {
+                            toast({ title: "Falha ao abrir WhatsApp", description: e?.message ?? String(e), variant: "destructive" });
+                          }
+                        };
+                        return (
+                          <div className="space-y-3">
+                            <div className="rounded-md bg-white/5 border border-white/10 p-3">
+                              <pre className="whitespace-pre-wrap text-sm text-muted-foreground">{shareText}</pre>
+                            </div>
+                            <DialogFooter className="gap-2">
+                              <Button variant="outline" onClick={handleCopy} className="inline-flex items-center gap-2">
+                                <Copy className="h-4 w-4" /> Copiar texto
+                              </Button>
+                              <Button onClick={handleOpenWhatsApp}>Abrir WhatsApp Web</Button>
+                            </DialogFooter>
+                          </div>
+                        );
+                      })()}
+                    </DialogContent>
+                  </Dialog>
 
                   {/* Detalhes ao expandir */}
                   {expandedEvents[ev.id] && (
@@ -489,13 +547,26 @@ const Memories = () => {
                         className="bg-white/5"
                       />
                     </div>
-                    <Button onClick={() => handlePublish(ev.id)} disabled={!canPublish}>Publicar</Button>
-                    {!canPublish && (
-                      <p className="text-xs text-muted-foreground">Somente quem confirmou check-in poderá publicar memórias.</p>
-                    )}
-                  </div>
-                </DialogContent>
-              </Dialog>
+                <Button onClick={() => handlePublish(ev.id)} disabled={!canPublish}>Publicar</Button>
+                {!canPublish && (
+                  <p className="text-xs text-muted-foreground">Somente quem confirmou check-in poderá publicar memórias.</p>
+                )}
+
+                {/* Compartilhar Memória: botão dentro do modal de detalhes (abre o diálogo acima) */}
+                <div className="pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShareDialogEventId(ev.id)}
+                    className="inline-flex items-center gap-2"
+                    aria-label="Compartilhar Memória"
+                  >
+                    <Share2 className="h-4 w-4" /> Compartilhar Memória
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
               </Fragment>
             );
           })}

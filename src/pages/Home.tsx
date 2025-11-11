@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { BarChart3, Star } from "lucide-react";
 import { useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 type EventRow = {
   id: string;
@@ -29,6 +30,7 @@ type FeedMemoryItem = { key: string; type: "memory"; data: { cover: string; even
 type FeedItem = FeedEventItem | FeedPollItem | FeedMemoryItem;
 
 const Home = () => {
+  const navigate = useNavigate();
   const [events, setEvents] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -583,10 +585,16 @@ const Home = () => {
               const p = item.data as Poll;
               const total = p.totalVotes;
               return (
-                <div key={item.key} className="rounded-xl p-4 border border-white/10 bg-white/5 backdrop-blur-md">
+                <div
+                  key={item.key}
+                  className="rounded-xl p-4 border border-white/10 bg-white/5 backdrop-blur-md cursor-pointer"
+                  onClick={() => navigate("/enquetes")}
+                  role="button"
+                  aria-label="Abrir área de enquetes"
+                >
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-lg font-semibold text-white">Enquete: {p.question}</div>
-                    <Link to="/polls" className="text-xs text-sky-400 hover:underline">Ver enquete</Link>
+                    <Link to="/enquetes" className="text-xs text-sky-400 hover:underline">Ver enquete</Link>
                   </div>
                   <div className="space-y-3">
                     {p.options.map((o) => {

@@ -15,7 +15,7 @@ export const Header = () => {
           <img
             src={logoSrc}
             alt="CAPS"
-            className="h-7 w-auto"
+            className="h-5 w-auto"
             onError={() => setLogoSrc("/placeholder.svg")}
           />
         </Link>

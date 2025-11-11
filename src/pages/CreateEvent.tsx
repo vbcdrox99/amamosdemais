@@ -95,6 +95,8 @@ const CreateEvent = () => {
         const form = e.currentTarget as HTMLFormElement;
         const formData = new FormData(form);
         const description = formData.get("description") as string | null;
+        const requirements = formData.get("requirements") as string | null;
+        const auxLinks = formData.get("aux_links") as string | null;
         const date = formData.get("date") as string | null;
         const time = formData.get("time") as string | null;
       
@@ -128,6 +130,8 @@ const CreateEvent = () => {
         const payload: Record<string, any> = {
           title: eventName,
           description,
+          requirements: requirements || null,
+          aux_links: auxLinks || null,
           cover_image_url: coverImage ?? null,
           event_timestamp: eventTimestamp,
           location_text: locationName || null,
@@ -325,6 +329,30 @@ const CreateEvent = () => {
             placeholder="Conte mais sobre o rolê..."
             className="bg-white/10 border-white/20 text-white placeholder:text-white/60 min-h-[120px] resize-none"
           />
+        </div>
+
+        {/* Requirements (optional) */}
+        <div className="space-y-2">
+          <Label htmlFor="requirements" className="text-white">Requisitos (opcional)</Label>
+          <Textarea
+            id="requirements"
+            name="requirements"
+            placeholder="Explique se precisa pagar algo, levar itens, vestir código de traje, documentos, etc."
+            className="bg-white/10 border-white/20 text-white placeholder:text-white/60 min-h-[100px] resize-none"
+          />
+          <div className="text-xs text-white/50">Este campo é opcional e ajuda participantes a se prepararem.</div>
+        </div>
+
+        {/* Links auxiliares (opcional) */}
+        <div className="space-y-2">
+          <Label htmlFor="aux_links" className="text-white">Links auxiliares (opcional)</Label>
+          <Textarea
+            id="aux_links"
+            name="aux_links"
+            placeholder="Cole aqui links úteis (pagamento, regulamento, mapa, lista de transmissão, etc.). Uma por linha ou separados por vírgulas."
+            className="bg-white/10 border-white/20 text-white placeholder:text-white/60 min-h-[100px] resize-none"
+          />
+          <div className="text-xs text-white/50">Aceita múltiplos links; serão salvos como texto.</div>
         </div>
 
         {/* Date and Time */}
