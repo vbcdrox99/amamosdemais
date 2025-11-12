@@ -20,6 +20,8 @@ interface EventCardProps {
   attendeeCount: number;
   // Indica se o evento já passou, para estilizar a data
   isPast?: boolean;
+  // Indicador de proximidade do dia ("É hoje" ou "É amanhã")
+  dayTag?: string | null;
 }
 
 export const EventCard = ({
@@ -32,6 +34,7 @@ export const EventCard = ({
   attendees,
   attendeeCount,
   isPast = false,
+  dayTag = null,
 }: EventCardProps) => {
   const isHot = attendeeCount >= 6;
   const navigate = useNavigate();
@@ -96,6 +99,11 @@ export const EventCard = ({
               <span className="text-sm font-medium text-foreground">
                 +{attendeeCount} confirmados
               </span>
+              {dayTag && !isPast && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-emerald-600/20 border border-emerald-500/40 text-emerald-300">
+                  {dayTag}
+                </span>
+              )}
               {isPast && (
                 <Button
                   variant="secondary"
