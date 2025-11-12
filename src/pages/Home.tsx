@@ -8,6 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { BarChart3, Star } from "lucide-react";
+import ProfileQuickView from "@/components/profile/ProfileQuickView";
+import { useAuthRole } from "@/hooks/useAuthRole";
 import { useLocation } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 
@@ -27,7 +29,9 @@ type Poll = { id: string; question: string; options: PollOption[]; totalVotes: n
 type FeedEventItem = { key: string; type: "event"; data: EventRow; score: number };
 type FeedPollItem = { key: string; type: "poll"; data: Poll; score: number };
 type FeedMemoryItem = { key: string; type: "memory"; data: { cover: string; eventId?: string }; score: number };
-type FeedItem = FeedEventItem | FeedPollItem | FeedMemoryItem;
+type BirthdayProfile = { id: string; full_name: string | null; avatar_url: string | null; birthdate: string | null };
+type FeedBirthdayItem = { key: string; type: "birthday"; data: BirthdayProfile & { nextDate: string; daysUntil: number; isPastGrace: boolean }; score: number };
+type FeedItem = FeedEventItem | FeedPollItem | FeedMemoryItem | FeedBirthdayItem;
 
 const Home = () => {
   const navigate = useNavigate();
@@ -41,6 +45,12 @@ const Home = () => {
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [memoryBump, setMemoryBump] = useState<{ eventId: string; ts: number } | null>(null);
   const [memoryDialogId, setMemoryDialogId] = useState<string | null>(null);
+  // Aniversariantes próximos
+  const [birthdays, setBirthdays] = useState<BirthdayProfile[]>([]);
+  const [profileViewOpen, setProfileViewOpen] = useState(false);
+  const [profileViewUserId, setProfileViewUserId] = useState<string | null>(null);
+  const [congratsMap, setCongratsMap] = useState<Record<string, Array<{ userId: string; full_name: string | null; avatar_url: string | null }>>>({});
+  const { profile } = useAuthRole() as any;
   // Contagem de participantes (going/maybe) por evento para evitar fetch por card
   const [hotCounts, setHotCounts] = useState<Record<string, number>>({});
   // Bumps temporários por interação (duração limitada) para reforçar relevância
@@ -54,6 +64,10 @@ const Home = () => {
     const [target] = arr.splice(idx, 1);
     return [target, ...arr];
   })();
+
+  // RSVPs do usuário por evento, para lembretes de check-in
+  const [rsvpByEvent, setRsvpByEvent] = useState<Record<string, { status: string | null; checkin_confirmed: boolean; reminder_dismissed: boolean }>>({});
+  const [checkinReminderEventId, setCheckinReminderEventId] = useState<string | null>(null);
 
   useEffect(() => {
     // carrega ID fixado do storage
@@ -89,6 +103,58 @@ const Home = () => {
     };
     load();
   }, []);
+
+  // Carregar RSVPs do usuário para eventos na janela de check-in e decidir lembrete
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const uid = (profile as any)?.id;
+        if (!uid) { setRsvpByEvent({}); setCheckinReminderEventId(null); return; }
+        // Seleciona eventos que estão dentro da janela de check-in (até 48h antes e não passou)
+        const candidates = events.filter((e) => {
+          const ts = e.event_timestamp ? new Date(e.event_timestamp).getTime() : null;
+          if (ts === null) return false;
+          const diff = ts - Date.now();
+          return diff >= 0 && diff <= 48 * 60 * 60 * 1000;
+        });
+        const ids = candidates.map((e) => Number(e.id)).filter((n) => Number.isFinite(n));
+        if (ids.length === 0) { setRsvpByEvent({}); setCheckinReminderEventId(null); return; }
+        const { data, error } = await supabase
+          .from("event_rsvps")
+          .select("event_id,status,checkin_confirmed,reminder_dismissed")
+          .eq("user_id", uid)
+          .in("event_id", ids);
+        if (error) throw error;
+        const map: Record<string, { status: string | null; checkin_confirmed: boolean; reminder_dismissed: boolean }> = {};
+        (data ?? []).forEach((row: any) => {
+          map[String(row.event_id)] = {
+            status: (row.status ?? null) as string | null,
+            checkin_confirmed: !!row.checkin_confirmed,
+            reminder_dismissed: !!row.reminder_dismissed,
+          };
+        });
+        setRsvpByEvent(map);
+        // Escolhe o evento mais próximo dentro da janela que precisa de lembrete
+        const needing = candidates
+          .filter((e) => {
+            const rs = map[String(e.id)];
+            const status = rs?.status ?? null;
+            const okStatus = status === "going" || status === "maybe";
+            return okStatus && !rs?.checkin_confirmed && !rs?.reminder_dismissed;
+          })
+          .sort((a, b) => {
+            const ta = a.event_timestamp ? new Date(a.event_timestamp).getTime() : Infinity;
+            const tb = b.event_timestamp ? new Date(b.event_timestamp).getTime() : Infinity;
+            return ta - tb; // mais próximo primeiro
+          });
+        setCheckinReminderEventId(needing.length > 0 ? String(needing[0].id) : null);
+      } catch {
+        // Em falha, não mostrar lembrete
+        setCheckinReminderEventId(null);
+      }
+    };
+    run();
+  }, [events.map((e) => e.id).join("|"), profile?.id]);
 
   // Carrega contagens de RSVPs (going/maybe) para os eventos exibidos
   useEffect(() => {
@@ -401,6 +467,24 @@ const Home = () => {
     };
   }, []);
 
+  // Carrega perfis com aniversário definido
+  useEffect(() => {
+    const loadBirthdays = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("id, full_name, avatar_url, birthdate")
+          .not("birthdate", "is", null);
+        if (error) throw error;
+        setBirthdays((data ?? []) as BirthdayProfile[]);
+      } catch (err: any) {
+        toast({ title: "Falha ao carregar aniversários", description: err?.message ?? "" });
+        setBirthdays([]);
+      }
+    };
+    loadBirthdays();
+  }, []);
+
   // Assina criação de memórias (comentários/fotos): ao publicar, o rolê associado sobe
   useEffect(() => {
     const channel = supabase
@@ -570,6 +654,8 @@ const Home = () => {
   useEffect(() => {
     const items: FeedItem[] = [];
     const now = Date.now();
+    const nowDate = new Date();
+    const today = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
 
     // Eventos: ordenação pela proximidade de event_timestamp em relação a agora
     for (const row of events) {
@@ -586,6 +672,56 @@ const Home = () => {
       const pscore = -pdiff;
       items.push({ key: `poll-${p.id}`, type: "poll", data: p, score: pscore });
     }
+
+    // Aniversários próximos: <=30 dias antes, e desaparecem após 2 dias
+    const computeNextBirthday = (bdStr: string | null): { next: Date | null; daysUntil: number | null; isPastGrace: boolean } => {
+      if (!bdStr) return { next: null, daysUntil: null, isPastGrace: false };
+      const bd = new Date(bdStr);
+      if (isNaN(bd.getTime())) return { next: null, daysUntil: null, isPastGrace: false };
+      const month = bd.getMonth();
+      const day = bd.getDate();
+      const year = today.getFullYear();
+      let next = new Date(year, month, day);
+      // zera horas
+      next.setHours(0, 0, 0, 0);
+      // se já passou, verificar janela de graça de 2 dias; se passou mais que isso, empurra para próximo ano
+      const diffMs = next.getTime() - today.getTime();
+      if (diffMs < 0) {
+        const daysSince = Math.floor((today.getTime() - next.getTime()) / (24 * 60 * 60 * 1000));
+        if (daysSince <= 2) {
+          return { next, daysUntil: -daysSince, isPastGrace: true };
+        }
+        // próximo ano
+        next = new Date(year + 1, month, day);
+        next.setHours(0, 0, 0, 0);
+      }
+      const daysUntil = Math.floor((next.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+      return { next, daysUntil, isPastGrace: false };
+    };
+
+    for (const profile of birthdays) {
+      const { next, daysUntil, isPastGrace } = computeNextBirthday(profile.birthdate);
+      if (!next || daysUntil === null) continue;
+      // regra de visibilidade: próximos 30 dias OU dentro de 2 dias após
+      const visible = isPastGrace || (daysUntil >= 0 && daysUntil <= 30);
+      if (!visible) continue;
+      const ts = next.getTime();
+      const diffAbs = Math.abs(ts - today.getTime());
+      const score = -diffAbs;
+      items.push({
+        key: `birthday-${profile.id}-${ts}`,
+        type: "birthday",
+        data: {
+          ...profile,
+          nextDate: next.toISOString(),
+          daysUntil,
+          isPastGrace,
+        },
+        score,
+      });
+    }
+
+    // Removido: não inserir aniversariante falso; apenas usuários reais
 
     // Memória: usa capa e data do último rolê finalizado com capa ou do evento sinalizado em memoryBump
     let memoryCover: string | null = null;
@@ -625,6 +761,34 @@ const Home = () => {
     setFeed(items);
   }, [events, polls, pinnedId, memoryBump]);
 
+  // Carregar parabéns para aniversariantes visíveis
+  useEffect(() => {
+    const loadCongrats = async () => {
+      const ids = feed
+        .filter((it) => it.type === "birthday")
+        .map((it) => (it as FeedBirthdayItem).data.id)
+        .filter((id) => !!id && id !== "fake-user-id");
+      if (ids.length === 0) return;
+      try {
+        const { data, error } = await supabase
+          .from("birthday_congrats")
+          .select("birthday_user_id, from_user_id, profiles:profiles!birthday_congrats_from_user_id_fkey(id, full_name, avatar_url)")
+          .in("birthday_user_id", ids);
+        if (error) throw error;
+        const map: Record<string, Array<{ userId: string; full_name: string | null; avatar_url: string | null }>> = {};
+        (data ?? []).forEach((row: any) => {
+          const k = String(row.birthday_user_id);
+          const pr = row.profiles ? { userId: String(row.profiles.id), full_name: row.profiles.full_name ?? null, avatar_url: row.profiles.avatar_url ?? null } : { userId: String(row.from_user_id), full_name: null, avatar_url: null };
+          const list = map[k] ?? [];
+          if (!list.some((x) => x.userId === pr.userId)) list.push(pr);
+          map[k] = list;
+        });
+        setCongratsMap(map);
+      } catch {}
+    };
+    loadCongrats();
+  }, [feed.map((i) => i.key).join("|")]);
+
   // Esteira unificada por relevância é construída em efeitos acima
   return (
     <div className="min-h-screen bg-black">
@@ -633,6 +797,48 @@ const Home = () => {
         <div className="space-y-3">
           <h2 className="text-2xl sm:text-3xl md:text-3xl font-extrabold leading-tight bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">Rolês</h2>
         </div>
+
+        {/* Lembrete de Check-in (in-app) */}
+        {(() => {
+          if (!checkinReminderEventId) return null;
+          const ev = events.find((e) => String(e.id) === String(checkinReminderEventId));
+          if (!ev) return null;
+          const ts = ev.event_timestamp ? new Date(ev.event_timestamp) : null;
+          const dateStr = ts ? ts.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
+          const timeStr = ts ? ts.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
+          return (
+            <Card className="p-4 border-emerald-500/40 bg-white/5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-white font-semibold">Check-in aberto</div>
+                  <div className="text-xs text-white/70">{ev.title} • {dateStr}{timeStr && ` às ${timeStr}`}</div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" className="h-8" onClick={() => navigate(`/evento/${ev.id}`)}>
+                    Ir ao evento
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    onClick={async () => {
+                      try {
+                        const uid = (profile as any)?.id;
+                        if (!uid) return;
+                        const { error } = await supabase
+                          .from("event_rsvps")
+                          .upsert({ event_id: Number(ev.id), user_id: uid, reminder_dismissed: true }, { onConflict: "event_id,user_id" });
+                        if (error) throw error;
+                        setRsvpByEvent((prev) => ({ ...prev, [String(ev.id)]: { ...(prev[String(ev.id)] ?? { status: null, checkin_confirmed: false, reminder_dismissed: false }), reminder_dismissed: true } }));
+                        setCheckinReminderEventId(null);
+                      } catch {}
+                    }}
+                  >Fechar</Button>
+                </div>
+              </div>
+            </Card>
+          );
+        })()}
 
         {/* Esteira unificada: Eventos, Memórias e Enquetes ordenados pela proximidade da data */}
         <div className="space-y-4">
@@ -648,6 +854,17 @@ const Home = () => {
               const timeStr = ts ? ts.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
               const isCheckinWindow = ts ? (ts.getTime() - Date.now() <= 48 * 60 * 60 * 1000 && ts.getTime() - Date.now() >= 0) : false;
               const isPast = ts ? ts.getTime() < Date.now() : false;
+              const dayTag = (() => {
+                if (!ts) return null;
+                const today = new Date();
+                const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                const eventStart = new Date(ts.getFullYear(), ts.getMonth(), ts.getDate());
+                const tomorrowStart = new Date(todayStart);
+                tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+                if (eventStart.getTime() === todayStart.getTime()) return "É hoje";
+                if (eventStart.getTime() === tomorrowStart.getTime()) return "É amanhã";
+                return null;
+              })();
               return (
                 <div key={item.key} className={`rounded-xl p-3 border ${isCheckinWindow ? "border-emerald-500/60" : "border-white/10"} bg-white/5 backdrop-blur-md`}>
                   <EventCard
@@ -660,7 +877,77 @@ const Home = () => {
                     attendees={[]}
                     attendeeCount={hotCounts[String(row.id)] ?? 0}
                     isPast={isPast}
+                    dayTag={dayTag}
                   />
+                </div>
+              );
+            }
+            if (item.type === "birthday") {
+              const p = item.data as FeedBirthdayItem["data"];
+              const nextDate = new Date(p.nextDate);
+              const dateStr = nextDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+              const name = (p.full_name ?? "") || "Aniversariante";
+              const whenLabel = (() => {
+                if (p.isPastGrace) {
+                  const since = Math.abs(p.daysUntil);
+                  if (since === 0) return "hoje";
+                  if (since === 1) return "ontem";
+                  return `${since} dias atrás`;
+                }
+                if (p.daysUntil === 0) return "hoje";
+                if (p.daysUntil === 1) return "amanhã";
+                return `em ${p.daysUntil} dias`;
+              })();
+              return (
+                <div
+                  key={item.key}
+                  className="rounded-xl p-4 border border-emerald-500/40 bg-white/5 backdrop-blur-md cursor-pointer"
+                  onClick={() => { setProfileViewUserId(p.id || null); setProfileViewOpen(true); }}
+                  role="button"
+                  aria-label={`Abrir perfil de ${name}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Star className="h-5 w-5 text-emerald-400" aria-label="Aniversário" />
+                    <div className="flex-1">
+                      <div className="text-white font-semibold">Aniversário de {name}</div>
+                      <div className="text-xs text-white/70">{dateStr} • {whenLabel}</div>
+                    </div>
+                    {p.avatar_url && (
+                      <img src={p.avatar_url} alt={name} className="h-8 w-8 rounded-full object-cover" />
+                    )}
+                  </div>
+                  <div className="mt-3 flex items-center gap-3">
+                    <Button
+                      className="h-7 px-2 text-xs text-white bg-amber-600/50 hover:bg-amber-600/60 border border-amber-500/50"
+                      disabled={!profile?.id}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!profile?.id) return;
+                        try {
+                          const { error } = await supabase
+                            .from("birthday_congrats")
+                            .insert({ birthday_user_id: p.id, from_user_id: profile.id });
+                          if (error) throw error;
+                          const entry = { userId: String(profile.id), full_name: profile.full_name ?? null, avatar_url: profile.avatar_url ?? null };
+                          setCongratsMap((prev) => {
+                            const list = prev[p.id] ?? [];
+                            const exists = list.some((x) => x.userId === entry.userId);
+                            const next = exists ? list : [entry, ...list];
+                            return { ...prev, [p.id]: next };
+                          });
+                          toast({ title: "Parabéns enviado!" });
+                        } catch (err: any) {
+                          const msg = typeof err?.message === 'string' ? err.message : 'Falha ao enviar parabéns';
+                          toast({ title: "Erro", description: msg });
+                        }
+                      }}
+                    >Parabéns!</Button>
+                    <div className="flex -space-x-2">
+                      {(congratsMap[p.id] ?? []).slice(0, 6).map((u) => (
+                        <img key={u.userId} src={u.avatar_url ?? "/placeholder.svg"} alt={u.full_name ?? "Usuário"} className="h-6 w-6 rounded-full border border-white/20 object-cover" />
+                      ))}
+                    </div>
+                  </div>
                 </div>
               );
             }
@@ -764,6 +1051,8 @@ const Home = () => {
             })()}
           </Dialog>
         </div>
+        {/* Modal de perfil do aniversariante com destaque dourado */}
+        <ProfileQuickView userId={profileViewUserId} open={profileViewOpen} onOpenChange={setProfileViewOpen} highlightGold={true} />
       </div>
     </div>
   );
