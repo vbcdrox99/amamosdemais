@@ -12,15 +12,17 @@ type ProfileRow = {
   avatar_url: string | null;
   phone_number: string | null;
   instagram: string | null;
+  birthdate: string | null;
 };
 
 interface ProfileQuickViewProps {
   userId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  highlightGold?: boolean;
 }
 
-export default function ProfileQuickView({ userId, open, onOpenChange }: ProfileQuickViewProps) {
+export default function ProfileQuickView({ userId, open, onOpenChange, highlightGold = false }: ProfileQuickViewProps) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ProfileRow | null>(null);
   const [rsvps, setRsvps] = useState<Array<{ event_id: number; status: "going" | "maybe" | "not-going"; checkin_confirmed: boolean | null; events?: { id: number; title: string | null } | null }>>([]);
@@ -31,7 +33,7 @@ export default function ProfileQuickView({ userId, open, onOpenChange }: Profile
       setLoading(true);
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name, avatar_url, phone_number, instagram")
+        .select("id, full_name, avatar_url, phone_number, instagram, birthdate")
         .eq("id", userId)
         .maybeSingle();
       setLoading(false);
@@ -65,6 +67,22 @@ export default function ProfileQuickView({ userId, open, onOpenChange }: Profile
   const igUrl = formatInstagramUrl(igHandle);
   const waNumber = normalizePhoneNumber(data?.phone_number || "");
   const waUrl = waNumber ? `https://wa.me/${waNumber}` : null;
+  const age = (() => {
+    const iso = data?.birthdate || null;
+    if (!iso) return null;
+    const parts = iso.split("-");
+    if (parts.length !== 3) return null;
+    const y = Number(parts[0]);
+    const m = Number(parts[1]) - 1; // JS months 0-11
+    const d = Number(parts[2]);
+    const dob = new Date(y, m, d);
+    if (isNaN(dob.getTime())) return null;
+    const today = new Date();
+    let a = today.getFullYear() - dob.getFullYear();
+    const hasHadBirthday = (today.getMonth() > dob.getMonth()) || (today.getMonth() === dob.getMonth() && today.getDate() >= dob.getDate());
+    if (!hasHadBirthday) a -= 1;
+    return a >= 0 ? a : null;
+  })();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -75,7 +93,7 @@ export default function ProfileQuickView({ userId, open, onOpenChange }: Profile
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <Avatar className="h-14 w-14 ring-1 ring-white/20">
+            <Avatar className={`h-14 w-14 ${highlightGold ? "ring-2 ring-yellow-400 shadow-[0_0_0_3px_rgba(234,179,8,0.2)]" : "ring-1 ring-white/20"}`}>
               {data?.avatar_url ? (
                 <AvatarImage src={data.avatar_url} alt={name} />
               ) : (
@@ -84,7 +102,10 @@ export default function ProfileQuickView({ userId, open, onOpenChange }: Profile
               <AvatarFallback className="text-sm">{initials}</AvatarFallback>
             </Avatar>
             <div>
-              <div className="text-sm font-semibold text-white">{name}</div>
+              <div className={`text-sm font-semibold ${highlightGold ? "text-yellow-300" : "text-white"}`}>{name}</div>
+              {typeof age === 'number' && (
+                <div className="text-xs text-white/80">{age} anos</div>
+              )}
               {data?.phone_number && (
                 <div className="text-xs text-white/70 flex items-center gap-1">
                   <Phone className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />

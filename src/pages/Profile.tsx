@@ -20,6 +20,7 @@ const Profile = () => {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [birthdateInput, setBirthdateInput] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [rsvps, setRsvps] = useState<Array<{ event_id: number; status: "going" | "maybe" | "not-going"; checkin_confirmed: boolean | null; events?: { id: number; title: string | null; event_timestamp: string | null; location_text: string | null } | null }>>([]);
   const [loadingRsvps, setLoadingRsvps] = useState(false);
@@ -29,7 +30,37 @@ const Profile = () => {
     setFullName(profile?.full_name ?? "");
     setInstagram(profile?.instagram ?? "");
     setAvatarUrl(profile?.avatar_url ?? null);
+    // Preenche data de aniversário em dd/mm/aaaa a partir do formato ISO (yyyy-mm-dd)
+    const iso = profile?.birthdate ?? null;
+    if (iso) {
+      const [y, m, d] = iso.split("-");
+      if (y && m && d) {
+        setBirthdateInput(`${d.padStart(2, "0")}/${m.padStart(2, "0")}/${y}`);
+      } else {
+        setBirthdateInput("");
+      }
+    } else {
+      setBirthdateInput("");
+    }
   }, [flags.isAuthenticated, profile?.full_name, profile?.instagram, profile?.avatar_url]);
+
+  // Idade calculada a partir do birthdate ISO (yyyy-mm-dd)
+  const age = useMemo(() => {
+    const iso = profile?.birthdate || null;
+    if (!iso) return null;
+    const parts = iso.split("-");
+    if (parts.length !== 3) return null;
+    const y = Number(parts[0]);
+    const m = Number(parts[1]) - 1; // JS months 0-11
+    const d = Number(parts[2]);
+    const dob = new Date(y, m, d);
+    if (isNaN(dob.getTime())) return null;
+    const today = new Date();
+    let a = today.getFullYear() - dob.getFullYear();
+    const hasHadBirthday = (today.getMonth() > dob.getMonth()) || (today.getMonth() === dob.getMonth() && today.getDate() >= dob.getDate());
+    if (!hasHadBirthday) a -= 1;
+    return a >= 0 ? a : null;
+  }, [profile?.birthdate]);
 
   // Carregar RSVPs e check-ins do próprio usuário
   useEffect(() => {
@@ -106,6 +137,21 @@ const Profile = () => {
       const igHandle = extractInstagramHandle(instagram);
       updatePayload.instagram = igHandle && igHandle.length > 0 ? igHandle : null;
       if (avatarUrlToSave) updatePayload.avatar_url = avatarUrlToSave;
+
+      // Converter dd/mm/aaaa -> yyyy-mm-dd
+      const bd = (birthdateInput || "").trim();
+      const digits = bd.replace(/\D+/g, "");
+      if (digits.length === 8) {
+        const d = digits.slice(0, 2);
+        const m = digits.slice(2, 4);
+        const y = digits.slice(4, 8);
+        // Validação simples de data
+        const yNum = Number(y), mNum = Number(m), dNum = Number(d);
+        const valid = yNum >= 1900 && yNum <= 2100 && mNum >= 1 && mNum <= 12 && dNum >= 1 && dNum <= 31;
+        updatePayload.birthdate = valid ? `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}` : null;
+      } else {
+        updatePayload.birthdate = null;
+      }
 
       const { error } = await supabase
         .from("profiles")
@@ -204,6 +250,9 @@ const Profile = () => {
               onChange={(e) => setFullName(e.target.value)}
               placeholder="Seu nome ou apelido"
             />
+            {typeof age === 'number' && (
+              <div className="text-xs text-muted-foreground">Idade: {age} anos</div>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Instagram</Label>
@@ -215,6 +264,23 @@ const Profile = () => {
                 setInstagram(h ? formatInstagramDisplay(h) : "");
               }}
               placeholder="@seuusuario"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Data de aniversário</Label>
+            <Input
+              value={birthdateInput}
+              onChange={(e) => {
+                const raw = e.target.value;
+                // Mantém apenas dígitos e aplica máscara dd/mm/aaaa
+                const digits = raw.replace(/\D+/g, "").slice(0, 8);
+                let out = digits;
+                if (digits.length >= 3) out = `${digits.slice(0,2)}/${digits.slice(2)}`;
+                if (digits.length >= 5) out = `${digits.slice(0,2)}/${digits.slice(2,4)}/${digits.slice(4)}`;
+                setBirthdateInput(out);
+              }}
+              placeholder="dd/mm/aaaa"
+              inputMode="numeric"
             />
           </div>
           <div className="flex gap-2">

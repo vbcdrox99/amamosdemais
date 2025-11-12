@@ -418,7 +418,7 @@ const Polls = () => {
                           <Button variant="outline" onClick={handleCopy} className="inline-flex items-center gap-2">
                             <Copy className="h-4 w-4" /> Copiar texto
                           </Button>
-                          <Button onClick={handleOpenWhatsApp}>Abrir WhatsApp Web</Button>
+                          <Button onClick={handleOpenWhatsApp}>Enviar no WhatsApp</Button>
                         </DialogFooter>
                       </div>
                     );

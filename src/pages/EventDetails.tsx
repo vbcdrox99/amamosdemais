@@ -36,6 +36,8 @@ const EventDetails = () => {
     id: string;
     title: string;
     description: string | null;
+    requirements?: string | null;
+    aux_links?: string | null;
     cover_image_url: string | null;
     event_timestamp: string | null;
     location_text: string | null;
@@ -95,7 +97,7 @@ const EventDetails = () => {
       setLoading(true);
       const { data, error } = await supabase
         .from("events")
-        .select("id,title,description,cover_image_url,event_timestamp,location_text,created_by")
+        .select("id,title,description,requirements,aux_links,cover_image_url,event_timestamp,location_text,created_by")
         .eq("id", Number(id))
         .maybeSingle();
       setLoading(false);
@@ -184,7 +186,34 @@ const EventDetails = () => {
     if (!event?.event_timestamp) return "Sem data";
     try {
       const d = new Date(event.event_timestamp);
-      return d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+      const raw = d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+      const weekdaysMap: Record<string, string> = {
+        "domingo": "Domingo",
+        "segunda-feira": "Segunda-Feira",
+        "terça-feira": "Terça-Feira",
+        "quarta-feira": "Quarta-Feira",
+        "quinta-feira": "Quinta-Feira",
+        "sexta-feira": "Sexta-Feira",
+        "sábado": "Sábado",
+      };
+      const monthsMap: Record<string, string> = {
+        "janeiro": "Janeiro",
+        "fevereiro": "Fevereiro",
+        "março": "Março",
+        "abril": "Abril",
+        "maio": "Maio",
+        "junho": "Junho",
+        "julho": "Julho",
+        "agosto": "Agosto",
+        "setembro": "Setembro",
+        "outubro": "Outubro",
+        "novembro": "Novembro",
+        "dezembro": "Dezembro",
+      };
+      let out = raw;
+      Object.entries(weekdaysMap).forEach(([k, v]) => { out = out.replace(k, v); });
+      Object.entries(monthsMap).forEach(([k, v]) => { out = out.replace(k, v); });
+      return out;
     } catch {
       return "Sem data";
     }
@@ -199,6 +228,16 @@ const EventDetails = () => {
       return "";
     }
   }, [event?.event_timestamp]);
+
+  // Links auxiliares (parse de múltiplos formatos: linhas e vírgulas)
+  const auxLinks = useMemo(() => {
+    const raw = (event?.aux_links || "").trim();
+    if (!raw) return [] as string[];
+    return raw
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }, [event?.aux_links]);
 
   // Definir janela de check-in ANTES de qualquer uso
   const isCheckinWindow = useMemo(() => {
@@ -240,7 +279,7 @@ const EventDetails = () => {
     if (!ev) return "";
     const when = `${dateStr}${timeStr ? ` às ${timeStr}` : ""}`;
     const where = ev.location_text ?? "local a definir";
-    return `Bora pro rolê? ${ev.title} — ${when} em ${where}`.trim();
+    return `${ev.title} — ${when} em ${where}`.trim();
   };
   const buildCheckinInvite = (ev: EventRow | null) => {
     if (!ev) return "";
@@ -253,7 +292,7 @@ const EventDetails = () => {
     const defaultInvite = isCheckinWindow ? buildCheckinInvite(event) : buildNormalInvite(event);
     setInviteMessage(defaultInvite);
   }, [event, dateStr, timeStr, isCheckinWindow]);
-  const fullInvite = `${inviteMessage}\n\n${eventUrl}`;
+  const fullInvite = `${inviteMessage}\n\n⭐${eventUrl}⭐`;
 
   // Deriva grupos de horários (inclui o horário fixado do evento primeiro)
   const fixedTimeLabel = timeStr || "";
@@ -812,6 +851,42 @@ const EventDetails = () => {
             </p>
           </div>
 
+          {/* Requisitos (opcional) */}
+          {event?.requirements && event.requirements.trim() && (
+            <div className="space-y-2">
+              <h3 className="font-semibold text-foreground">Requisitos</h3>
+              <p className="text-muted-foreground leading-relaxed whitespace-pre-line">
+                {event.requirements}
+              </p>
+            </div>
+          )}
+
+          {/* Links auxiliares (opcional) */}
+          {auxLinks.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="font-semibold text-foreground">Links auxiliares</h3>
+              <div className="flex flex-col gap-2">
+                {auxLinks.map((link, idx) => {
+                  const href = /^https?:\/\//i.test(link) ? link : `https://${link}`;
+                  const maxLen = 60;
+                  const display = link.length > maxLen ? `${link.slice(0, maxLen - 3)}...` : link;
+                  return (
+                    <a
+                      key={`aux-${idx}`}
+                      href={href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary underline break-all"
+                      title={link}
+                    >
+                      {display}
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           
 
           {/* RSVP / Check-in */}
@@ -1185,7 +1260,7 @@ const EventDetails = () => {
                     Copiar link
                   </Button>
                   <Button onClick={handleOpenWhatsApp}>
-                    Abrir WhatsApp Web
+                    Enviar no WhatsApp
                   </Button>
                 </DialogFooter>
               </DialogContent>
