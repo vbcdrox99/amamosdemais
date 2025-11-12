@@ -10,7 +10,7 @@ type AuthState = {
 
 export function useAuthRole() {
   const [state, setState] = useState<AuthState>({ loading: true, session: null });
-  const [profile, setProfile] = useState<{ id: string; email: string | null; phone_number?: string | null; full_name?: string | null; avatar_url?: string | null; instagram?: string | null; is_approved?: boolean } | null>(null);
+  const [profile, setProfile] = useState<{ id: string; email: string | null; phone_number?: string | null; full_name?: string | null; avatar_url?: string | null; instagram?: string | null; birthdate?: string | null; is_approved?: boolean; is_admin?: boolean } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -39,7 +39,7 @@ export function useAuthRole() {
       }
       const { data, error } = await supabase
         .from("profiles")
-        .select("id,email,phone_number,full_name,avatar_url,instagram,is_approved")
+        .select("id,email,phone_number,full_name,avatar_url,instagram,birthdate,is_approved,is_admin")
         .eq("id", userId)
         .maybeSingle();
       if (error) {
@@ -49,15 +49,15 @@ export function useAuthRole() {
           clearAuthStorage();
         } catch {}
         try { await supabase.auth.signOut(); } catch {}
-        setProfile({ id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, is_approved: false });
+        setProfile({ id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, is_approved: false, is_admin: false });
         // Redireciona para autenticação para recuperar sessão
         try { if (location.pathname !== "/auth") location.replace("/auth"); } catch {}
         return;
       }
       setProfile(
         data
-          ? { id: data.id, email: (data as any).email ?? null, phone_number: (data as any).phone_number ?? null, full_name: (data as any).full_name ?? null, avatar_url: (data as any).avatar_url ?? null, instagram: (data as any).instagram ?? null, is_approved: (data as any).is_approved ?? false }
-          : { id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, instagram: null, is_approved: false }
+          ? { id: data.id, email: (data as any).email ?? null, phone_number: (data as any).phone_number ?? null, full_name: (data as any).full_name ?? null, avatar_url: (data as any).avatar_url ?? null, instagram: (data as any).instagram ?? null, birthdate: (data as any).birthdate ?? null, is_approved: (data as any).is_approved ?? false, is_admin: (data as any).is_admin ?? false }
+          : { id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, instagram: null, birthdate: null, is_approved: false, is_admin: false }
       );
     };
     loadProfile();
@@ -81,6 +81,7 @@ export function useAuthRole() {
             full_name: next.full_name ?? prev?.full_name ?? null,
             avatar_url: next.avatar_url ?? prev?.avatar_url ?? null,
             instagram: next.instagram ?? prev?.instagram ?? null,
+            birthdate: next.birthdate ?? prev?.birthdate ?? null,
             is_approved: !!next.is_approved,
           }));
         }
@@ -100,7 +101,7 @@ export function useAuthRole() {
     const tick = async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id,email,phone_number,full_name,avatar_url,instagram,is_approved")
+        .select("id,email,phone_number,full_name,avatar_url,instagram,birthdate,is_approved,is_admin")
         .eq("id", userId)
         .maybeSingle();
       if (!cancelled && !error && data) {
@@ -111,7 +112,9 @@ export function useAuthRole() {
           full_name: (data as any).full_name ?? null,
           avatar_url: (data as any).avatar_url ?? null,
           instagram: (data as any).instagram ?? null,
+          birthdate: (data as any).birthdate ?? null,
           is_approved: !!(data as any).is_approved,
+          is_admin: !!(data as any).is_admin,
         });
       }
     };
@@ -131,10 +134,15 @@ export function useAuthRole() {
     // Quando login é por telefone, o email da sessão é um alias: "<digits>@email.com"
     const emailLocalPart = (email.split("@")[0] ?? "");
     const phoneFromAlias = normalizePhoneNumber(emailLocalPart);
+    const adminEmails = ["dotaplaybrasil111@gmail.com"]; // Fallback por email
+    const adminPhones = ["11996098995", "75981423232"]; // Fallback por telefone
+    // Preferir flag no banco (perfil.is_admin); manter fallbacks para compatibilidade
+    const isAdminByProfile = !!profile?.is_admin;
     return (
-      email === "dotaplaybrasil111@gmail.com" ||
-      phoneProfile === "11996098995" ||
-      phoneFromAlias === "11996098995"
+      isAdminByProfile ||
+      adminEmails.includes(email) ||
+      adminPhones.includes(phoneProfile) ||
+      adminPhones.includes(phoneFromAlias)
     );
   }, [state.session?.user?.email, profile?.phone_number]);
 
