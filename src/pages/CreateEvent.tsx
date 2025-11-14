@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
@@ -40,6 +41,8 @@ const CreateEvent = () => {
   const [selectedHour, setSelectedHour] = useState<string | null>(null);
   const [selectedMinute, setSelectedMinute] = useState<string | null>(null);
   const selectedTimeStr = useMemo(() => (selectedHour && selectedMinute ? `${selectedHour}:${selectedMinute}` : ""), [selectedHour, selectedMinute]);
+  const [extraKind, setExtraKind] = useState<"none" | "esquenta" | "after">("none");
+  const [extraLocation, setExtraLocation] = useState<string>("");
 
   useEffect(() => {
     const loadVenues = async () => {
@@ -177,6 +180,8 @@ const CreateEvent = () => {
           instagram_url: instagramUrl || null,
           venue_id: selectedVenueId || null,
           created_by: profile?.id ?? null,
+          extra_kind: extraKind,
+          extra_location: extraKind === "none" ? null : (extraLocation || null),
         };
 
         const { error } = await supabase.from("events").insert(payload);
@@ -402,6 +407,24 @@ const CreateEvent = () => {
             </div>
 
             <div className="h-px bg-white/10" />
+
+            <div className="space-y-2">
+              <Label className="text-white">Vai ter</Label>
+              <ToggleGroup type="single" value={extraKind} onValueChange={(v) => { if (v) { setExtraKind(v as any); if (v === "none") setExtraLocation(""); } }}>
+                <ToggleGroupItem value="esquenta" className="bg-white/10 border-white/20 text-white hover:bg-white/10">Esquenta</ToggleGroupItem>
+                <ToggleGroupItem value="after" className="bg-white/10 border-white/20 text-white hover:bg-white/10">After</ToggleGroupItem>
+                <ToggleGroupItem value="none" className="bg-white/10 border-white/20 text-white hover:bg-white/10">Nenhum</ToggleGroupItem>
+              </ToggleGroup>
+              {(extraKind === "esquenta" || extraKind === "after") && (
+                <Input
+                  id="extra_location"
+                  value={extraLocation}
+                  onChange={(e) => setExtraLocation(e.target.value)}
+                  placeholder={extraKind === "esquenta" ? "Onde será o esquenta?" : "Onde será o after?"}
+                  className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
+                />
+              )}
+            </div>
 
             {/* Data e Horário dentro de Detalhes do Rolê */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

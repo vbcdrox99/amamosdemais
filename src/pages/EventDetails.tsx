@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, MapPin, Clock, Calendar, Share2, Copy, Flame } from "lucide-react";
+import { ArrowLeft, MapPin, Clock, Calendar, Share2, Copy, Flame, Pencil } from "lucide-react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,8 @@ const EventDetails = () => {
     event_timestamp: string | null;
     location_text: string | null;
     created_by?: string | null;
+    extra_kind?: string | null;
+    extra_location?: string | null;
   };
 
   const [event, setEvent] = useState<EventRow | null>(null);
@@ -97,7 +99,7 @@ const EventDetails = () => {
       setLoading(true);
       const { data, error } = await supabase
         .from("events")
-        .select("id,title,description,requirements,aux_links,cover_image_url,event_timestamp,location_text,created_by")
+        .select("id,title,description,requirements,aux_links,cover_image_url,event_timestamp,location_text,created_by,extra_kind,extra_location")
         .eq("id", Number(id))
         .maybeSingle();
       setLoading(false);
@@ -279,13 +281,37 @@ const EventDetails = () => {
     if (!ev) return "";
     const when = `${dateStr}${timeStr ? ` às ${timeStr}` : ""}`;
     const where = ev.location_text ?? "local a definir";
-    return `${ev.title} — ${when} em ${where}`.trim();
+    const desc = (ev.description || "").trim();
+    const base = `${ev.title} — ${when} em ${where}`.trim();
+    const extras = (() => {
+      const kind = (ev.extra_kind || "none").toLowerCase();
+      const loc = (ev.extra_location || "").trim();
+      if ((kind === "after" || kind === "esquenta") && loc) {
+        const label = kind === "after" ? "After" : "Esquenta";
+        return `\n\nO ${label} vai ser ${loc}`;
+      }
+      return "";
+    })();
+    const withDesc = desc ? `${base}\n\n${desc}` : base;
+    return `${withDesc}${extras}`;
   };
   const buildCheckinInvite = (ev: EventRow | null) => {
     if (!ev) return "";
     const when = `${dateStr}${timeStr ? ` às ${timeStr}` : ""}`;
     const where = ev.location_text ?? "local a definir";
-    return `Check-in aberto! ${ev.title} — ${when} em ${where}. Faça seu check-in ao chegar 👊`.trim();
+    const desc = (ev.description || "").trim();
+    const base = `Check-in aberto! ${ev.title} — ${when} em ${where}. Faça seu check-in ao chegar 👊`.trim();
+    const extras = (() => {
+      const kind = (ev.extra_kind || "none").toLowerCase();
+      const loc = (ev.extra_location || "").trim();
+      if ((kind === "after" || kind === "esquenta") && loc) {
+        const label = kind === "after" ? "After" : "Esquenta";
+        return `\n\nO ${label} vai ser ${loc}`;
+      }
+      return "";
+    })();
+    const withDesc = desc ? `${base}\n\n${desc}` : base;
+    return `${withDesc}${extras}`;
   };
   useEffect(() => {
     if (!event) return;
@@ -461,6 +487,11 @@ const EventDetails = () => {
   const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
   const [savingCover, setSavingCover] = useState(false);
 
+  const canEditDescription = isCreator || isAdmin;
+  const [descEditOpen, setDescEditOpen] = useState(false);
+  const [newDescription, setNewDescription] = useState<string>("");
+  const [savingDescription, setSavingDescription] = useState(false);
+
   const handleChooseCover = (file: File) => {
     setCoverFile(file);
     try {
@@ -509,6 +540,25 @@ const EventDetails = () => {
       toast({ title: "Erro ao salvar foto", description: e?.message ?? String(e), variant: "destructive" });
     } finally {
       setSavingCover(false);
+    }
+  };
+
+  const handleSaveDescription = async () => {
+    if (!id) return;
+    try {
+      setSavingDescription(true);
+      const { error } = await supabase
+        .from("events")
+        .update({ description: (newDescription || null) })
+        .eq("id", Number(id));
+      if (error) throw error;
+      setEvent((prev) => (prev ? { ...prev, description: (newDescription || null) } : prev));
+      setDescEditOpen(false);
+      toast({ title: "Descrição atualizada" });
+    } catch (e: any) {
+      toast({ title: "Erro ao salvar", description: e?.message ?? String(e), variant: "destructive" });
+    } finally {
+      setSavingDescription(false);
     }
   };
 
@@ -845,10 +895,43 @@ const EventDetails = () => {
 
           {/* Description */}
           <div className="space-y-2">
-            <h3 className="font-semibold text-foreground">Descrição</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-foreground">Descrição</h3>
+              {canEditDescription && (
+                <Button
+                  variant="link"
+                  size="icon"
+                  className="h-6 w-6 p-0 text-primary"
+                  onClick={() => { setDescEditOpen(true); setNewDescription(event?.description ?? ""); }}
+                  aria-label="Editar descrição"
+                  title="Editar descrição"
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
             <p className="text-muted-foreground leading-relaxed">
               {event?.description ?? "Sem descrição."}
             </p>
+            {canEditDescription && (
+              <Dialog open={descEditOpen} onOpenChange={setDescEditOpen}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Editar descrição</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-2">
+                    <Label>Descrição</Label>
+                    <Textarea value={newDescription} onChange={(e) => setNewDescription(e.target.value)} rows={6} />
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setDescEditOpen(false)}>Cancelar</Button>
+                    <Button onClick={handleSaveDescription} disabled={savingDescription}>
+                      {savingDescription ? "Salvando..." : "Salvar"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            )}
           </div>
 
           {/* Requisitos (opcional) */}
