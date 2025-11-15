@@ -20,21 +20,35 @@ type EventRow = {
   location_text?: string | null;
 };
 
+type MemoryRow = {
+  id: string;
+  event_id: string;
+  user_id: string;
+  comment: string | null;
+  photo_url: string | null;
+  created_at: string;
+  profiles?: { id: string; full_name: string | null; avatar_url: string | null } | null;
+};
+
 const Memories = () => {
   const { profile } = useAuthRole() as any;
   const { toast } = useToast();
+  const MEMORIES_BUCKET = "event-covers";
+  const MEMORIES_PREFIX = "memories";
   const [events, setEvents] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [checkins, setCheckins] = useState<Record<string, boolean>>({});
   const [commentByEvent, setCommentByEvent] = useState<Record<string, string>>({});
   const [fileByEvent, setFileByEvent] = useState<Record<string, File | null>>({});
   const [ratingByEvent, setRatingByEvent] = useState<Record<string, number>>({});
+  const [ratingsStats, setRatingsStats] = useState<Record<string, { avg: number; count: number }>>({});
   const [expandedEvents, setExpandedEvents] = useState<Record<string, boolean>>({});
   const [sampleExpanded, setSampleExpanded] = useState(false);
   const [sampleDialogOpen, setSampleDialogOpen] = useState(false);
   const [eventDialogId, setEventDialogId] = useState<string | null>(null);
   const [shareDialogEventId, setShareDialogEventId] = useState<string | null>(null);
   const [searchParams] = useSearchParams();
+  const [memoriesByEvent, setMemoriesByEvent] = useState<Record<string, MemoryRow[]>>({});
 
   useEffect(() => {
     const load = async () => {
@@ -81,6 +95,85 @@ const Memories = () => {
     };
     fetchCheckins();
   }, [profile?.id, events.map((e) => e.id).join(",")]);
+
+  const loadRatingsStats = async (ids: string[]) => {
+    if (!ids.length) return;
+    try {
+      const { data, error } = await supabase
+        .from("event_ratings")
+        .select("event_id,stars")
+        .in("event_id", ids.map((id) => Number(id)));
+      if (error) throw error;
+      const acc: Record<string, { sum: number; count: number }> = {};
+      for (const r of (data as any[])) {
+        const eid = String(r.event_id);
+        if (!acc[eid]) acc[eid] = { sum: 0, count: 0 };
+        acc[eid].sum += Number(r.stars || 0);
+        acc[eid].count += 1;
+      }
+      const stats: Record<string, { avg: number; count: number }> = {};
+      for (const [eid, { sum, count }] of Object.entries(acc)) {
+        stats[eid] = { avg: count ? sum / count : 0, count };
+      }
+      setRatingsStats(stats);
+    } catch (e: any) {
+      toast({ title: "Erro ao carregar avaliações", description: e?.message ?? String(e), variant: "destructive" });
+    }
+  };
+
+  const loadUserRatings = async (ids: string[]) => {
+    if (!profile?.id || !ids.length) return;
+    try {
+      const { data, error } = await supabase
+        .from("event_ratings")
+        .select("event_id,stars")
+        .eq("user_id", profile.id)
+        .in("event_id", ids.map((id) => Number(id)));
+      if (error) throw error;
+      const map: Record<string, number> = {};
+      for (const r of (data as any[])) {
+        map[String(r.event_id)] = Number(r.stars || 0);
+      }
+      setRatingByEvent((prev) => ({ ...prev, ...map }));
+    } catch (e: any) {
+      toast({ title: "Erro ao carregar sua avaliação", description: e?.message ?? String(e), variant: "destructive" });
+    }
+  };
+
+  useEffect(() => {
+    const ids = events.map((e) => String(e.id));
+    if (ids.length) {
+      loadRatingsStats(ids);
+      loadUserRatings(ids);
+    }
+  }, [events.map((e) => e.id).join(","), profile?.id]);
+
+  const loadMemories = async (eid: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("event_memories")
+        .select("id,event_id,user_id,comment,photo_url,created_at,profiles:profiles(id,full_name,avatar_url)")
+        .eq("event_id", Number(eid))
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      const rows = (data as any[]).map((row) => ({
+        id: String(row.id),
+        event_id: String(row.event_id),
+        user_id: String(row.user_id),
+        comment: row.comment ?? null,
+        photo_url: row.photo_url ?? null,
+        created_at: row.created_at ?? new Date().toISOString(),
+        profiles: row.profiles ? { id: String(row.profiles.id), full_name: row.profiles.full_name ?? null, avatar_url: row.profiles.avatar_url ?? null } : null,
+      }));
+      setMemoriesByEvent((prev) => ({ ...prev, [eid]: rows }));
+    } catch (e: any) {
+      toast({ title: "Erro ao carregar memórias", description: e?.message ?? String(e), variant: "destructive" });
+    }
+  };
+
+  useEffect(() => {
+    if (eventDialogId) loadMemories(eventDialogId);
+  }, [eventDialogId]);
 
   const pastCount = events.length;
   const sampleOnly = useMemo(() => pastCount === 0, [pastCount]);
@@ -129,13 +222,74 @@ const Memories = () => {
   const sampleRatingAvg = 4.6;
   const sampleRatingCount = 32;
 
-  const handlePublish = (eventId: string) => {
+  const handlePublish = async (eventId: string) => {
     const confirmed = !!checkins[eventId];
     if (!confirmed) {
       toast({ title: "Check-in necessário", description: "Somente quem confirmou presença pode publicar memórias." });
       return;
     }
-    toast({ title: "Em breve", description: "Upload de fotos e comentários será habilitado." });
+    if (!profile?.id) {
+      toast({ title: "Faça login", description: "Entre para publicar suas memórias." });
+      return;
+    }
+    const comment = (commentByEvent[eventId] || "").trim();
+    const file = fileByEvent[eventId] || null;
+    if (!comment && !file) {
+      toast({ title: "Nada para publicar", description: "Adicione um comentário e/ou uma foto." });
+      return;
+    }
+    let photoUrl: string | null = null;
+    try {
+      if (file) {
+        // Limite de 3 fotos por usuário por evento
+        const { count, error: countErr } = await supabase
+          .from("event_memories")
+          .select("id", { count: "exact", head: true })
+          .eq("event_id", Number(eventId))
+          .eq("user_id", profile.id)
+          .not("photo_url", "is", null);
+        if (countErr) throw countErr;
+        if ((count ?? 0) >= 3) {
+          toast({ title: "Limite de fotos atingido", description: "Você já publicou 3 fotos neste rolê." });
+          // Ainda permite publicar comentário sem foto
+          if (!comment) return;
+        }
+      }
+      if (file) {
+        if (!file.type.startsWith("image/")) {
+          toast({ title: "Arquivo inválido", description: "Envie apenas imagens." });
+          return;
+        }
+        const ext = (file.name.split(".").pop() || "jpeg").toLowerCase();
+        const path = `${MEMORIES_PREFIX}/${eventId}/${profile.id}/${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from(MEMORIES_BUCKET)
+          .upload(path, file, { upsert: false, contentType: file.type });
+        if (uploadError) throw uploadError;
+        const { data: publicData } = await supabase.storage
+          .from(MEMORIES_BUCKET)
+          .getPublicUrl(path);
+        photoUrl = publicData.publicUrl;
+      }
+
+      const payload: any = {
+        event_id: Number(eventId),
+        user_id: profile.id,
+        comment: comment || null,
+        photo_url: photoUrl,
+      };
+      const { error } = await supabase
+        .from("event_memories")
+        .insert(payload);
+      if (error) throw error;
+
+      setCommentByEvent((prev) => ({ ...prev, [eventId]: "" }));
+      setFileByEvent((prev) => ({ ...prev, [eventId]: null }));
+      await loadMemories(eventId);
+      toast({ title: "Memória publicada", description: photoUrl ? "Sua foto e comentário foram enviados." : "Seu comentário foi enviado." });
+    } catch (e: any) {
+      toast({ title: "Erro ao publicar", description: e?.message ?? String(e), variant: "destructive" });
+    }
   };
 
   const handleRate = (eventId: string, stars: number) => {
@@ -144,8 +298,20 @@ const Memories = () => {
       toast({ title: "Check-in necessário", description: "A avaliação é liberada para quem confirmou presença." });
       return;
     }
-    setRatingByEvent((prev) => ({ ...prev, [eventId]: stars }));
-    toast({ title: "Obrigado pela avaliação!", description: `Você marcou ${stars} estrela${stars>1?"s":""}. Em breve salvaremos.` });
+    const doSave = async () => {
+      try {
+        const { error } = await supabase
+          .from("event_ratings")
+          .upsert({ event_id: Number(eventId), user_id: profile?.id, stars }, { onConflict: "event_id,user_id" });
+        if (error) throw error;
+        setRatingByEvent((prev) => ({ ...prev, [eventId]: stars }));
+        await loadRatingsStats([eventId]);
+        toast({ title: "Avaliação salva", description: `Você marcou ${stars} estrela${stars>1?"s":""}.` });
+      } catch (e: any) {
+        toast({ title: "Erro ao salvar avaliação", description: e?.message ?? String(e), variant: "destructive" });
+      }
+    };
+    doSave();
   };
 
   return (
@@ -320,6 +486,9 @@ const Memories = () => {
             const dateStr = ts ? ts.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
             const timeStr = ts ? ts.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
             const canPublish = !!checkins[ev.id];
+            const mems = memoriesByEvent[ev.id] ?? [];
+            const photosCount = mems.filter((m) => !!m.photo_url).length;
+            const commentsCount = mems.filter((m) => !!m.comment && m.comment.trim().length > 0).length;
             return (
               <Fragment key={ev.id}>
               <Card className="overflow-hidden bg-card border-border">
@@ -340,15 +509,16 @@ const Memories = () => {
                     <h4 className="font-semibold">Nota do rolê</h4>
                     <div className="flex items-center gap-1">
                       {[1,2,3,4,5].map((s) => (
-                        <Star key={s} className="h-5 w-5 text-muted-foreground" fill="none" />
+                        <Star key={s} className={`h-5 w-5 ${s <= Math.round((ratingsStats[ev.id]?.avg ?? 0)) ? "text-yellow-400" : "text-muted-foreground"}`} fill={s <= Math.round((ratingsStats[ev.id]?.avg ?? 0)) ? "currentColor" : "none"} />
                       ))}
-                      <span className="text-xs text-muted-foreground ml-2">Média: em breve</span>
+                      <span className="text-xs text-muted-foreground ml-2">
+                        {ratingsStats[ev.id]?.count ? `Média: ${(ratingsStats[ev.id]!.avg).toFixed(1).replace('.', ',')} de 5 • ${ratingsStats[ev.id]!.count} avaliações` : "Média: —"}
+                      </span>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="px-2 py-1 rounded bg-white/5">Participantes: —</span>
-                    <span className="px-2 py-1 rounded bg-white/5">Fotos: —</span>
-                    <span className="px-2 py-1 rounded bg-white/5">Comentários: —</span>
+                    <span className="px-2 py-1 rounded bg-white/5">Fotos: {mems.length ? photosCount : "—"}</span>
+                    <span className="px-2 py-1 rounded bg-white/5">Comentários: {mems.length ? commentsCount : "—"}</span>
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button
@@ -462,15 +632,60 @@ const Memories = () => {
                       </div>
                       <div className="space-y-2">
                         <Label>Foto</Label>
-                        <Input
+                        <input
+                          id={`mem_file_${ev.id}`}
                           type="file"
                           accept="image/*"
                           disabled={!canPublish}
                           onChange={(e) => setFileByEvent((prev) => ({ ...prev, [ev.id]: e.target.files?.[0] ?? null }))}
-                          className="bg-white/5"
+                          className="hidden"
                         />
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!canPublish}
+                            onClick={() => document.getElementById(`mem_file_${ev.id}`)?.click()}
+                          >
+                            Selecionar imagem
+                          </Button>
+                          <span className="text-xs text-muted-foreground">
+                            {fileByEvent[ev.id]?.name ? `Arquivo selecionado: ${fileByEvent[ev.id]!.name}` : "Nenhum arquivo selecionado"}
+                          </span>
+                        </div>
                       </div>
                       <Button onClick={() => handlePublish(ev.id)} disabled={!canPublish}>Publicar</Button>
+                      {mems.length > 0 && (
+                        <div className="space-y-3">
+                          <div>
+                            <h4 className="font-semibold mb-2">Galeria</h4>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              {mems.filter((m) => !!m.photo_url).map((m) => (
+                                <div key={m.id} className="relative aspect-square overflow-hidden rounded">
+                                  <img src={m.photo_url!} alt="Foto" className="w-full h-full object-cover" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <h4 className="font-semibold mb-2">Comentários</h4>
+                            <div className="space-y-3">
+                              {mems.filter((m) => !!m.comment && m.comment.trim().length > 0).map((m) => (
+                                <div key={m.id} className="flex gap-3">
+                                  <div className="w-9 h-9 rounded-full overflow-hidden bg-white/5 shrink-0">
+                                    <img src={m.profiles?.avatar_url ?? "/placeholder.svg"} alt={m.profiles?.full_name ?? "Usuário"} className="w-full h-full object-cover" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="text-sm font-medium text-foreground">{m.profiles?.full_name ?? "Usuário"}</div>
+                                    <div className="text-xs text-muted-foreground mb-1">{new Date(m.created_at).toLocaleString("pt-BR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}</div>
+                                    <div className="text-sm text-foreground/90">{m.comment}</div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       {!canPublish && (
                         <p className="text-xs text-muted-foreground">Somente quem confirmou check-in poderá publicar memórias.</p>
                       )}
@@ -522,6 +737,9 @@ const Memories = () => {
                           </button>
                         ))}
                       </div>
+                      <div className="text-xs text-muted-foreground">
+                        {ratingsStats[ev.id]?.count ? `Média: ${(ratingsStats[ev.id]!.avg).toFixed(1).replace('.', ',')} de 5 • ${ratingsStats[ev.id]!.count} avaliações` : "Média: —"}
+                      </div>
                       {!canPublish && (
                         <p className="text-xs text-muted-foreground">Avaliação liberada para quem confirmou presença.</p>
                       )}
@@ -540,15 +758,60 @@ const Memories = () => {
                     </div>
                     <div className="space-y-2">
                       <Label>Foto</Label>
-                      <Input
+                      <input
+                        id={`mem_file_modal_${ev.id}`}
                         type="file"
                         accept="image/*"
                         disabled={!canPublish}
                         onChange={(e) => setFileByEvent((prev) => ({ ...prev, [ev.id]: e.target.files?.[0] ?? null }))}
-                        className="bg-white/5"
+                        className="hidden"
                       />
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!canPublish}
+                          onClick={() => document.getElementById(`mem_file_modal_${ev.id}`)?.click()}
+                        >
+                          Selecionar imagem
+                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                          {fileByEvent[ev.id]?.name ? `Arquivo selecionado: ${fileByEvent[ev.id]!.name}` : "Nenhum arquivo selecionado"}
+                        </span>
+                      </div>
                     </div>
                 <Button onClick={() => handlePublish(ev.id)} disabled={!canPublish}>Publicar</Button>
+                {mems.length > 0 && (
+                  <div className="space-y-3 pt-2">
+                    <div>
+                      <h4 className="font-semibold mb-2">Galeria</h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {mems.filter((m) => !!m.photo_url).map((m) => (
+                          <div key={m.id} className="relative aspect-square overflow-hidden rounded">
+                            <img src={m.photo_url!} alt="Foto" className="w-full h-full object-cover" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="font-semibold mb-2">Comentários</h4>
+                      <div className="space-y-3">
+                        {mems.filter((m) => !!m.comment && m.comment.trim().length > 0).map((m) => (
+                          <div key={m.id} className="flex gap-3">
+                            <div className="w-9 h-9 rounded-full overflow-hidden bg-white/5 shrink-0">
+                              <img src={m.profiles?.avatar_url ?? "/placeholder.svg"} alt={m.profiles?.full_name ?? "Usuário"} className="w-full h-full object-cover" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-foreground">{m.profiles?.full_name ?? "Usuário"}</div>
+                              <div className="text-xs text-muted-foreground mb-1">{new Date(m.created_at).toLocaleString("pt-BR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}</div>
+                              <div className="text-sm text-foreground/90">{m.comment}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {!canPublish && (
                   <p className="text-xs text-muted-foreground">Somente quem confirmou check-in poderá publicar memórias.</p>
                 )}

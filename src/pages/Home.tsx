@@ -66,8 +66,9 @@ const Home = () => {
   })();
 
   // RSVPs do usuário por evento, para lembretes de check-in
-  const [rsvpByEvent, setRsvpByEvent] = useState<Record<string, { status: string | null; checkin_confirmed: boolean; reminder_dismissed: boolean }>>({});
+  const [rsvpByEvent, setRsvpByEvent] = useState<Record<string, { status: string | null; checkin_confirmed: boolean; reminder_dismissed: boolean; memory_reminder_dismissed?: boolean }>>({});
   const [checkinReminderEventId, setCheckinReminderEventId] = useState<string | null>(null);
+  const [memoryReminderEventId, setMemoryReminderEventId] = useState<string | null>(null);
 
   useEffect(() => {
     // carrega ID fixado do storage
@@ -121,7 +122,7 @@ const Home = () => {
         if (ids.length === 0) { setRsvpByEvent({}); setCheckinReminderEventId(null); return; }
         const { data, error } = await supabase
           .from("event_rsvps")
-          .select("event_id,status,checkin_confirmed,reminder_dismissed")
+          .select("event_id,status,checkin_confirmed,reminder_dismissed,memory_reminder_dismissed")
           .eq("user_id", uid)
           .in("event_id", ids);
         if (error) throw error;
@@ -131,6 +132,7 @@ const Home = () => {
             status: (row.status ?? null) as string | null,
             checkin_confirmed: !!row.checkin_confirmed,
             reminder_dismissed: !!row.reminder_dismissed,
+            memory_reminder_dismissed: !!row.memory_reminder_dismissed,
           };
         });
         setRsvpByEvent(map);
@@ -151,6 +153,77 @@ const Home = () => {
       } catch {
         // Em falha, não mostrar lembrete
         setCheckinReminderEventId(null);
+      }
+    };
+    run();
+  }, [events.map((e) => e.id).join("|"), profile?.id]);
+
+  // Lembrete de Memórias/Avaliação para eventos passados em que houve check-in e o usuário ainda não publicou nada
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const uid = (profile as any)?.id;
+        if (!uid) { setMemoryReminderEventId(null); return; }
+        // Considera eventos dos últimos 14 dias que já passaram
+        const now = Date.now();
+        const lookback = now - 14 * 24 * 60 * 60 * 1000;
+        const candidates = events.filter((e) => {
+          const ts = e.event_timestamp ? new Date(e.event_timestamp).getTime() : null;
+          if (ts === null) return false;
+          return ts < now && ts >= lookback;
+        });
+        const ids = candidates.map((e) => Number(e.id)).filter((n) => Number.isFinite(n));
+        if (ids.length === 0) { setMemoryReminderEventId(null); return; }
+
+        // RSVPs do usuário nesses eventos
+        const { data: rsvps, error: rsvpErr } = await supabase
+          .from("event_rsvps")
+          .select("event_id,checkin_confirmed,memory_reminder_dismissed")
+          .eq("user_id", uid)
+          .in("event_id", ids);
+        if (rsvpErr) throw rsvpErr;
+        const rsvpMap: Record<string, { checkin_confirmed: boolean; memory_reminder_dismissed: boolean }> = {};
+        (rsvps ?? []).forEach((r: any) => {
+          rsvpMap[String(r.event_id)] = { checkin_confirmed: !!r.checkin_confirmed, memory_reminder_dismissed: !!r.memory_reminder_dismissed };
+        });
+
+        // Memórias do usuário (qualquer comentário ou foto)
+        const { data: mems, error: memErr } = await supabase
+          .from("event_memories")
+          .select("event_id")
+          .eq("user_id", uid)
+          .in("event_id", ids);
+        if (memErr) throw memErr;
+        const memSet = new Set<string>((mems ?? []).map((m: any) => String(m.event_id)));
+
+        // Avaliações do usuário
+        const { data: rates, error: rateErr } = await supabase
+          .from("event_ratings")
+          .select("event_id")
+          .eq("user_id", uid)
+          .in("event_id", ids);
+        if (rateErr) throw rateErr;
+        const rateSet = new Set<string>((rates ?? []).map((r: any) => String(r.event_id)));
+
+        const needing = candidates
+          .filter((e) => {
+            const key = String(e.id);
+            const rs = rsvpMap[key];
+            if (!rs?.checkin_confirmed) return false;
+            if (rs.memory_reminder_dismissed) return false;
+            const hasMem = memSet.has(key);
+            const hasRate = rateSet.has(key);
+            // precisa publicar ao menos uma memória OU avaliação
+            return !hasMem || !hasRate;
+          })
+          .sort((a, b) => {
+            const ta = a.event_timestamp ? new Date(a.event_timestamp).getTime() : -Infinity;
+            const tb = b.event_timestamp ? new Date(b.event_timestamp).getTime() : -Infinity;
+            return tb - ta; // mais recente primeiro
+          });
+        setMemoryReminderEventId(needing.length > 0 ? String(needing[0].id) : null);
+      } catch {
+        setMemoryReminderEventId(null);
       }
     };
     run();
@@ -831,6 +904,47 @@ const Home = () => {
                         if (error) throw error;
                         setRsvpByEvent((prev) => ({ ...prev, [String(ev.id)]: { ...(prev[String(ev.id)] ?? { status: null, checkin_confirmed: false, reminder_dismissed: false }), reminder_dismissed: true } }));
                         setCheckinReminderEventId(null);
+                      } catch {}
+                    }}
+                  >Fechar</Button>
+                </div>
+              </div>
+            </Card>
+          );
+        })()}
+
+        {/* Lembrete de Memória/Avaliação (in-app) - apenas para quem fez check-in */}
+        {(() => {
+          if (!memoryReminderEventId) return null;
+          const ev = events.find((e) => String(e.id) === String(memoryReminderEventId));
+          if (!ev) return null;
+          const ts = ev.event_timestamp ? new Date(ev.event_timestamp) : null;
+          const dateStr = ts ? ts.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
+          const timeStr = ts ? ts.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
+          return (
+            <Card className="p-4 border-emerald-500/40 bg-white/5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-white font-semibold">Memória pendente</div>
+                  <div className="text-xs text-white/70">{ev.title} • {dateStr}{timeStr && ` às ${timeStr}`}</div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" className="h-8" onClick={() => navigate(`/memorias?eventId=${ev.id}`)}>
+                    Abrir memórias
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    onClick={async () => {
+                      try {
+                        const uid = (profile as any)?.id;
+                        if (!uid) return;
+                        const { error } = await supabase
+                          .from("event_rsvps")
+                          .upsert({ event_id: Number(ev.id), user_id: uid, memory_reminder_dismissed: true }, { onConflict: "event_id,user_id" });
+                        if (error) throw error;
+                        setMemoryReminderEventId(null);
                       } catch {}
                     }}
                   >Fechar</Button>
