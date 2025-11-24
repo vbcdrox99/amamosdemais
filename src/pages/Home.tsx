@@ -831,7 +831,17 @@ const Home = () => {
 
     // Ordena por score desc (score = -distância => mais próximo fica primeiro)
     items.sort((a, b) => b.score - a.score);
-    setFeed(items);
+    // Limita a quantidade de eventos (rolês) exibidos a no máximo 10
+    const finalItems: FeedItem[] = [];
+    let eventShown = 0;
+    for (const it of items) {
+      if (it.type === "event") {
+        if (eventShown >= 10) continue;
+        eventShown += 1;
+      }
+      finalItems.push(it);
+    }
+    setFeed(finalItems);
   }, [events, polls, pinnedId, memoryBump]);
 
   // Carregar parabéns para aniversariantes visíveis
