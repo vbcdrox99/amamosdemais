@@ -318,7 +318,7 @@ const EventDetails = () => {
     const defaultInvite = isCheckinWindow ? buildCheckinInvite(event) : buildNormalInvite(event);
     setInviteMessage(defaultInvite);
   }, [event, dateStr, timeStr, isCheckinWindow]);
-  const fullInvite = `${inviteMessage}\n\n⭐${eventUrl}⭐`;
+  const fullInvite = `${inviteMessage}\n\nConfirme sua presença aqui 👉\n${eventUrl}`;
 
   // Deriva grupos de horários (inclui o horário fixado do evento primeiro)
   const fixedTimeLabel = timeStr || "";
