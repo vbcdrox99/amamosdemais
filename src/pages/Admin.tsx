@@ -60,6 +60,60 @@ const Admin = () => {
     setProfiles(data ?? []);
   };
 
+  const reloadProfiles = async () => {
+    const { data } = await supabase
+      .from("profiles")
+      .select("id,email,phone_number,full_name,is_approved")
+      .order("phone_number", { ascending: true, nullsFirst: true })
+      .order("full_name", { ascending: true, nullsFirst: true });
+    setProfiles(data ?? []);
+  };
+
+  const deleteUserCascade = async (userId: string) => {
+    // Remove dependências antes de excluir perfil para evitar erros de FK
+    try { await supabase.from("event_rsvps").delete().eq("user_id", userId); } catch {}
+    try { await supabase.from("poll_votes").delete().eq("user_id", userId); } catch {}
+    try { await supabase.from("event_memories").delete().eq("user_id", userId); } catch {}
+    try { await supabase.from("event_ratings").delete().eq("user_id", userId); } catch {}
+    try { await supabase.from("birthday_congrats").delete().or(`from_user_id.eq.${userId},birthday_user_id.eq.${userId}`); } catch {}
+    const { error } = await supabase.from("profiles").delete().eq("id", userId);
+    if (error) throw error;
+  };
+
+  const handleDeleteMember = async (userId: string) => {
+    try {
+      await deleteUserCascade(userId);
+      toast({ title: "Membro excluído", description: "Dados apagados e acesso desativado." });
+      await reloadProfiles();
+    } catch (e: any) {
+      toast({ title: "Falha ao excluir", description: e?.message ?? String(e), variant: "destructive" });
+    }
+  };
+
+  const handleMakeAdmin = async (userId: string) => {
+    try {
+      const { error } = await supabase.from("profiles").update({ is_admin: true }).eq("id", userId);
+      if (error) {
+        toast({ title: "Erro ao tornar admin", description: error.message, variant: "destructive" });
+        return;
+      }
+      toast({ title: "Admin atribuído", description: "Este usuário agora é administrador." });
+      await reloadProfiles();
+    } catch (e: any) {
+      toast({ title: "Falha ao atribuir admin", description: e?.message ?? String(e), variant: "destructive" });
+    }
+  };
+
+  const handleRejectPending = async (userId: string) => {
+    try {
+      await deleteUserCascade(userId);
+      toast({ title: "Cadastro rejeitado", description: "Usuário removido da lista. Pode se cadastrar novamente." });
+      await reloadProfiles();
+    } catch (e: any) {
+      toast({ title: "Erro ao rejeitar cadastro", description: e?.message ?? String(e), variant: "destructive" });
+    }
+  };
+
   if (!permissions?.canAccessAdmin) {
     return (
       <div className="min-h-screen pt-24 pb-20 px-4">
@@ -108,7 +162,18 @@ const Admin = () => {
                           <div className="text-xs text-muted-foreground">{u.full_name}</div>
                         )}
                       </button>
-                      <div className="flex gap-2" />
+                      <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => handleMakeAdmin(u.id)}>Tornar admin</Button>
+                        <Button
+                          variant="destructive"
+                          onClick={() => {
+                            const ok = window.confirm("Excluir este membro? Isso apaga dados pessoais e desativa o acesso.");
+                            if (ok) handleDeleteMember(u.id);
+                          }}
+                        >
+                          Excluir
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -138,6 +203,25 @@ const Admin = () => {
                       </button>
                       <div className="flex gap-2">
                         <Button onClick={() => handleApprove(u.id)}>Aprovar</Button>
+                        <Button
+                          variant="destructive"
+                          onClick={() => {
+                            const ok = window.confirm("Não aprovar e excluir este cadastro? Os dados serão apagados.");
+                            if (ok) handleRejectPending(u.id);
+                          }}
+                        >
+                          Não aprovar
+                        </Button>
+                        <Button variant="outline" onClick={() => handleMakeAdmin(u.id)}>Tornar admin</Button>
+                        <Button
+                          variant="destructive"
+                          onClick={() => {
+                            const ok = window.confirm("Excluir este membro? Isso apaga dados pessoais e desativa o acesso.");
+                            if (ok) handleDeleteMember(u.id);
+                          }}
+                        >
+                          Excluir
+                        </Button>
                       </div>
                     </div>
                   ))}
