@@ -127,7 +127,7 @@ export function useAuthRole() {
     };
   }, [state.session?.user?.id, profile?.is_approved]);
 
-  // Determina admin pela conta específica solicitada
+  // Determina admin/MASTER pela conta específica solicitada
   const isAdmin = useMemo(() => {
     const email = state.session?.user?.email?.toLowerCase() ?? "";
     const phoneProfile = profile?.phone_number ?? "";
@@ -144,6 +144,15 @@ export function useAuthRole() {
       adminPhones.includes(phoneProfile) ||
       adminPhones.includes(phoneFromAlias)
     );
+  }, [state.session?.user?.email, profile?.phone_number]);
+
+  const isMaster = useMemo(() => {
+    const phoneProfile = normalizePhoneNumber(profile?.phone_number ?? "");
+    const email = state.session?.user?.email?.toLowerCase() ?? "";
+    const emailLocalPart = (email.split("@")[0] ?? "");
+    const phoneFromAlias = normalizePhoneNumber(emailLocalPart);
+    const masterPhones = ["11996098995"];
+    return masterPhones.includes(phoneProfile) || masterPhones.includes(phoneFromAlias);
   }, [state.session?.user?.email, profile?.phone_number]);
 
   // Níveis: 3 admin, 2 autenticado, 1 convidado
@@ -168,6 +177,7 @@ export function useAuthRole() {
     canCreatePolls: !!state.session && approvedOrAdmin,
     canEditOwnProfile: !!state.session && approvedOrAdmin,
     canAccessAdmin: isAdmin,
+    canManageAdmins: isMaster,
   };
 
   // Considera carregando enquanto sessão está carregando OU perfil ainda não obtido após login
@@ -177,5 +187,5 @@ export function useAuthRole() {
     return state.loading || (sessionLoaded && waitingProfile);
   }, [state.loading, state.session, profile]);
 
-  return { ...state, loading: loadingCombined, level, flags, permissions, profile, isAdmin } as any;
+  return { ...state, loading: loadingCombined, level, flags, permissions, profile, isAdmin, isMaster } as any;
 }

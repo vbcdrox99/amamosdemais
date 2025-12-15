@@ -11,7 +11,7 @@ import ProfileQuickView from "@/components/profile/ProfileQuickView";
 const Admin = () => {
   const { toast } = useToast();
   const { permissions } = useAuthRole() as any;
-  const [profiles, setProfiles] = useState<Array<{ id: string; email: string | null; phone_number: string | null; full_name: string | null; is_approved: boolean }>>([]);
+  const [profiles, setProfiles] = useState<Array<{ id: string; email: string | null; phone_number: string | null; full_name: string | null; is_approved: boolean; is_admin?: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [profileViewOpen, setProfileViewOpen] = useState(false);
@@ -22,7 +22,7 @@ const Admin = () => {
       setLoading(true);
       const { data, error } = await supabase
         .from("profiles")
-        .select("id,email,phone_number,full_name,is_approved")
+        .select("id,email,phone_number,full_name,is_approved,is_admin")
         .order("phone_number", { ascending: true, nullsFirst: true })
         .order("full_name", { ascending: true, nullsFirst: true });
       setLoading(false);
@@ -63,7 +63,7 @@ const Admin = () => {
   const reloadProfiles = async () => {
     const { data } = await supabase
       .from("profiles")
-      .select("id,email,phone_number,full_name,is_approved")
+      .select("id,email,phone_number,full_name,is_approved,is_admin")
       .order("phone_number", { ascending: true, nullsFirst: true })
       .order("full_name", { ascending: true, nullsFirst: true });
     setProfiles(data ?? []);
@@ -111,6 +111,20 @@ const Admin = () => {
       await reloadProfiles();
     } catch (e: any) {
       toast({ title: "Erro ao rejeitar cadastro", description: e?.message ?? String(e), variant: "destructive" });
+    }
+  };
+
+  const handleRemoveAdmin = async (userId: string) => {
+    try {
+      const { error } = await supabase.from("profiles").update({ is_admin: false }).eq("id", userId);
+      if (error) {
+        toast({ title: "Erro ao remover admin", description: error.message, variant: "destructive" });
+        return;
+      }
+      toast({ title: "Admin removido", description: "Este usuário não é mais administrador." });
+      await reloadProfiles();
+    } catch (e: any) {
+      toast({ title: "Falha ao remover admin", description: e?.message ?? String(e), variant: "destructive" });
     }
   };
 
@@ -163,6 +177,17 @@ const Admin = () => {
                         )}
                       </button>
                       <div className="flex gap-2">
+                        {permissions?.canManageAdmins && u.is_admin && (
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              const ok = window.confirm("Remover privilégios de admin deste usuário?");
+                              if (ok) handleRemoveAdmin(u.id);
+                            }}
+                          >
+                            Remover admin
+                          </Button>
+                        )}
                         <Button variant="outline" onClick={() => handleMakeAdmin(u.id)}>Tornar admin</Button>
                         <Button
                           variant="destructive"
