@@ -64,12 +64,28 @@ const Admin = () => {
     const { data } = await supabase
       .from("profiles")
       .select("id,email,phone_number,full_name,is_approved,is_admin")
+      .not("phone_number", "is", null)
       .order("phone_number", { ascending: true, nullsFirst: true })
       .order("full_name", { ascending: true, nullsFirst: true });
     setProfiles(data ?? []);
   };
 
   const deleteUserCascade = async (userId: string) => {
+    // Sanitiza perfil para esconder em consultas e remover dados pessoais
+    try {
+      await supabase
+        .from("profiles")
+        .update({
+          is_approved: false,
+          is_admin: false,
+          full_name: null,
+          avatar_url: null,
+          instagram: null,
+          birthdate: null,
+          phone_number: null,
+        })
+        .eq("id", userId);
+    } catch {}
     // Remove dependências antes de excluir perfil para evitar erros de FK
     try { await supabase.from("event_rsvps").delete().eq("user_id", userId); } catch {}
     try { await supabase.from("poll_votes").delete().eq("user_id", userId); } catch {}
@@ -83,7 +99,10 @@ const Admin = () => {
   const handleDeleteMember = async (userId: string) => {
     try {
       await deleteUserCascade(userId);
-      toast({ title: "Membro excluído", description: "Dados apagados e acesso desativado." });
+      const deleted = profiles.find((p) => p.id === userId);
+      const name = (deleted?.full_name ?? "").trim() || formatPhoneBR(deleted?.phone_number || "");
+      toast({ title: "Usuário apagado", description: name ? `${name}` : "Dados apagados e acesso desativado." });
+      setProfiles((prev) => prev.filter((p) => p.id !== userId));
       await reloadProfiles();
     } catch (e: any) {
       toast({ title: "Falha ao excluir", description: e?.message ?? String(e), variant: "destructive" });
@@ -107,7 +126,9 @@ const Admin = () => {
   const handleRejectPending = async (userId: string) => {
     try {
       await deleteUserCascade(userId);
-      toast({ title: "Cadastro rejeitado", description: "Usuário removido da lista. Pode se cadastrar novamente." });
+      const deleted = profiles.find((p) => p.id === userId);
+      const name = (deleted?.full_name ?? "").trim() || formatPhoneBR(deleted?.phone_number || "");
+      toast({ title: "Usuário apagado", description: name ? `${name}` : "Usuário removido da lista. Pode se cadastrar novamente." });
       await reloadProfiles();
     } catch (e: any) {
       toast({ title: "Erro ao rejeitar cadastro", description: e?.message ?? String(e), variant: "destructive" });
@@ -127,6 +148,18 @@ const Admin = () => {
       toast({ title: "Falha ao remover admin", description: e?.message ?? String(e), variant: "destructive" });
     }
   };
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("admin-profiles-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, async () => {
+        await reloadProfiles();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   if (!permissions?.canAccessAdmin) {
     return (
