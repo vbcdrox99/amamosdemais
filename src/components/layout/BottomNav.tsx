@@ -1,4 +1,4 @@
-import { Calendar, BarChart3, PlusCircle, Camera, User } from "lucide-react";
+import { Calendar, Users, PlusCircle, Camera, User } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuthRole } from "@/hooks/useAuthRole";
@@ -9,8 +9,8 @@ export const BottomNav = () => {
   const { flags } = useAuthRole();
   const navItems: NavItem[] = [
     { icon: Calendar, label: "Rolês", path: "/" },
-    // Mantém rotas reais e delega controle ao RouteGuard
-    { icon: BarChart3, label: "Enquetes", path: "/enquetes" },
+    // Novo menu de membros substitui enquetes
+    { icon: Users, label: "Membros", path: "/membros" },
     { icon: PlusCircle, label: "Criar", path: "/criar", isSpecial: true },
     { icon: Camera, label: "Memórias", path: "/memorias" },
     { icon: User, label: flags.isAuthenticated ? "Perfil" : "Entrar", path: flags.isAuthenticated ? "/perfil" : "/auth" },

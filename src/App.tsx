@@ -16,6 +16,7 @@ import Auth from "./pages/Auth";
 import Admin from "./pages/Admin";
 import Profile from "./pages/Profile";
 // Editar Perfil removido
+import Members from "./pages/Members";
 import { useEffect } from "react";
 // Conexão com banco removida
 import { RouteGuard } from "@/components/auth/RouteGuard";
@@ -78,6 +79,7 @@ const App = () => {
               <Route path="/evento/:id" element={<EventDetails />} />
               <Route path="/criar" element={<RouteGuard minLevel={2}><CreateEvent /></RouteGuard>} />
               <Route path="/enquetes" element={<RouteGuard minLevel={2}><Polls /></RouteGuard>} />
+              <Route path="/membros" element={<RouteGuard minLevel={1}><Members /></RouteGuard>} />
               <Route path="/memorias" element={<Memories />} />
               <Route path="/perfil" element={<RouteGuard minLevel={1}><Profile /></RouteGuard>} />
               <Route path="/admin" element={<RouteGuard minLevel={3}><Admin /></RouteGuard>} />
