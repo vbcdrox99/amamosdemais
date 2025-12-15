@@ -76,7 +76,7 @@ const App = () => {
             )}
             <Routes>
               <Route path="/" element={<Home />} />
-              <Route path="/evento/:id" element={<EventDetails />} />
+              <Route path="/evento/:id" element={<RouteGuard minLevel={2}><EventDetails /></RouteGuard>} />
               <Route path="/criar" element={<RouteGuard minLevel={2}><CreateEvent /></RouteGuard>} />
               <Route path="/enquetes" element={<RouteGuard minLevel={2}><Polls /></RouteGuard>} />
               <Route path="/membros" element={<RouteGuard minLevel={1}><Members /></RouteGuard>} />

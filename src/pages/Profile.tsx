@@ -63,6 +63,10 @@ const Profile = () => {
   const [capitalZone, setCapitalZone] = useState<string>("");
   const [capitalArea, setCapitalArea] = useState<string>("");
   const [metroCity, setMetroCity] = useState<string>("");
+  const musicalOptions = ["Pop","Rock","Sertanejo","Funk","Pagode","Samba","MPB","Rap/Hip-Hop","Eletrônica","Forró","Axé","Reggae","Indie","Trap","Jazz"];
+  const eventOptions = ["Barzinho","Trilha","Praia","Balada","Piscina","Cinema","Teatro","Show","Churrasco","Café","Parque","Museu","Festa em casa","Karaokê","Jogo esportivo"];
+  const [musicalLikes, setMusicalLikes] = useState<string[]>([]);
+  const [eventLikes, setEventLikes] = useState<string[]>([]);
 
   useEffect(() => {
     if (!flags.isAuthenticated) return;
@@ -112,6 +116,8 @@ const Profile = () => {
       setCapitalZone("");
       setMetroCity("");
     }
+    setMusicalLikes(Array.isArray(profile?.musical_likes) ? (profile?.musical_likes as string[]) : []);
+    setEventLikes(Array.isArray(profile?.event_likes) ? (profile?.event_likes as string[]) : []);
   }, [flags.isAuthenticated, profile?.full_name, profile?.instagram, profile?.avatar_url, profile?.region_label]);
 
   // Idade calculada a partir do birthdate ISO (yyyy-mm-dd)
@@ -233,6 +239,8 @@ const Profile = () => {
         regionLabel = metroCity || null;
       }
       updatePayload.region_label = regionLabel;
+      updatePayload.musical_likes = musicalLikes.slice(0, 3);
+      updatePayload.event_likes = eventLikes.slice(0, 3);
 
       const { error } = await supabase
         .from("profiles")
@@ -419,6 +427,69 @@ const Profile = () => {
                 </Select>
               </div>
             )}
+          </div>
+          <div className="space-y-3">
+            <Label>Gostos</Label>
+            <div className="space-y-2">
+              <div className="text-xs text-white/70">Musical (máx. 3)</div>
+              <div className="flex flex-wrap gap-2">
+                {musicalOptions.map((opt) => {
+                  const active = musicalLikes.includes(opt);
+                  return (
+                    <Button
+                      key={`m-${opt}`}
+                      type="button"
+                      variant={active ? "secondary" : "outline"}
+                      size="sm"
+                      className={active ? "bg-emerald-600/20 border-emerald-500/40" : ""}
+                      onClick={() => {
+                        if (active) {
+                          setMusicalLikes(musicalLikes.filter((x) => x !== opt));
+                        } else {
+                          if (musicalLikes.length >= 3) {
+                            toast({ title: "Limite atingido", description: "Você pode escolher até 3 gostos musicais." });
+                          } else {
+                            setMusicalLikes([...musicalLikes, opt]);
+                          }
+                        }
+                      }}
+                    >
+                      {opt}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs text-white/70">Eventos (máx. 3)</div>
+              <div className="flex flex-wrap gap-2">
+                {eventOptions.map((opt) => {
+                  const active = eventLikes.includes(opt);
+                  return (
+                    <Button
+                      key={`e-${opt}`}
+                      type="button"
+                      variant={active ? "secondary" : "outline"}
+                      size="sm"
+                      className={active ? "bg-sky-600/20 border-sky-500/40" : ""}
+                      onClick={() => {
+                        if (active) {
+                          setEventLikes(eventLikes.filter((x) => x !== opt));
+                        } else {
+                          if (eventLikes.length >= 3) {
+                            toast({ title: "Limite atingido", description: "Você pode escolher até 3 tipos de evento." });
+                          } else {
+                            setEventLikes([...eventLikes, opt]);
+                          }
+                        }
+                      }}
+                    >
+                      {opt}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:flex sm:gap-2">
             <Button onClick={handleSave} disabled={saving} className="h-10 px-3 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30 w-full sm:w-auto">

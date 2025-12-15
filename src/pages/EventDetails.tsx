@@ -24,7 +24,7 @@ type RsvpStatus = "going" | "maybe" | "not-going" | null;
 const EventDetails = () => {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { permissions, flags } = useAuthRole();
+  const { permissions, flags, profile } = useAuthRole();
   const [rsvpStatus, setRsvpStatus] = useState<RsvpStatus>(null);
   const [rsvpLoading, setRsvpLoading] = useState(false);
   const [checkinConfirmed, setCheckinConfirmed] = useState(false);
@@ -118,7 +118,6 @@ const EventDetails = () => {
   }, [id]);
 
   // Carrega RSVP do usuário para este evento
-  const { profile } = useAuthRole() as any;
   useEffect(() => {
     const loadRsvp = async () => {
       if (!profile?.id || !id) return;

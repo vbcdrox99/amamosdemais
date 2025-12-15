@@ -10,7 +10,7 @@ type AuthState = {
 
 export function useAuthRole() {
   const [state, setState] = useState<AuthState>({ loading: true, session: null });
-  const [profile, setProfile] = useState<{ id: string; email: string | null; phone_number?: string | null; full_name?: string | null; avatar_url?: string | null; instagram?: string | null; birthdate?: string | null; is_approved?: boolean; is_admin?: boolean } | null>(null);
+  const [profile, setProfile] = useState<{ id: string; email: string | null; phone_number?: string | null; full_name?: string | null; avatar_url?: string | null; instagram?: string | null; birthdate?: string | null; region_label?: string | null; musical_likes?: string[] | null; event_likes?: string[] | null; is_approved?: boolean; is_admin?: boolean } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -39,7 +39,7 @@ export function useAuthRole() {
       }
       const { data, error } = await supabase
         .from("profiles")
-        .select("id,email,phone_number,full_name,avatar_url,instagram,birthdate,is_approved,is_admin")
+        .select("id,email,phone_number,full_name,avatar_url,instagram,birthdate,region_label,musical_likes,event_likes,is_approved,is_admin")
         .eq("id", userId)
         .maybeSingle();
       if (error) {
@@ -49,15 +49,15 @@ export function useAuthRole() {
           clearAuthStorage();
         } catch {}
         try { await supabase.auth.signOut(); } catch {}
-        setProfile({ id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, is_approved: false, is_admin: false });
+        setProfile({ id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, region_label: null, musical_likes: [], event_likes: [], is_approved: false, is_admin: false });
         // Redireciona para autenticação para recuperar sessão
         try { if (location.pathname !== "/auth") location.replace("/auth"); } catch {}
         return;
       }
       setProfile(
         data
-          ? { id: data.id, email: (data as any).email ?? null, phone_number: (data as any).phone_number ?? null, full_name: (data as any).full_name ?? null, avatar_url: (data as any).avatar_url ?? null, instagram: (data as any).instagram ?? null, birthdate: (data as any).birthdate ?? null, is_approved: (data as any).is_approved ?? false, is_admin: (data as any).is_admin ?? false }
-          : { id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, instagram: null, birthdate: null, is_approved: false, is_admin: false }
+          ? { id: data.id, email: (data as any).email ?? null, phone_number: (data as any).phone_number ?? null, full_name: (data as any).full_name ?? null, avatar_url: (data as any).avatar_url ?? null, instagram: (data as any).instagram ?? null, birthdate: (data as any).birthdate ?? null, region_label: (data as any).region_label ?? null, musical_likes: (data as any).musical_likes ?? [], event_likes: (data as any).event_likes ?? [], is_approved: (data as any).is_approved ?? false, is_admin: (data as any).is_admin ?? false }
+          : { id: userId, email: state.session?.user?.email ?? null, phone_number: null, full_name: null, avatar_url: null, instagram: null, birthdate: null, region_label: null, musical_likes: [], event_likes: [], is_approved: false, is_admin: false }
       );
     };
     loadProfile();
@@ -82,6 +82,9 @@ export function useAuthRole() {
             avatar_url: next.avatar_url ?? prev?.avatar_url ?? null,
             instagram: next.instagram ?? prev?.instagram ?? null,
             birthdate: next.birthdate ?? prev?.birthdate ?? null,
+            region_label: next.region_label ?? prev?.region_label ?? null,
+            musical_likes: next.musical_likes ?? prev?.musical_likes ?? [],
+            event_likes: next.event_likes ?? prev?.event_likes ?? [],
             is_approved: !!next.is_approved,
           }));
         }
@@ -101,7 +104,7 @@ export function useAuthRole() {
     const tick = async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id,email,phone_number,full_name,avatar_url,instagram,birthdate,is_approved,is_admin")
+        .select("id,email,phone_number,full_name,avatar_url,instagram,birthdate,region_label,musical_likes,event_likes,is_approved,is_admin")
         .eq("id", userId)
         .maybeSingle();
       if (!cancelled && !error && data) {
@@ -113,6 +116,9 @@ export function useAuthRole() {
           avatar_url: (data as any).avatar_url ?? null,
           instagram: (data as any).instagram ?? null,
           birthdate: (data as any).birthdate ?? null,
+          region_label: (data as any).region_label ?? null,
+          musical_likes: (data as any).musical_likes ?? [],
+          event_likes: (data as any).event_likes ?? [],
           is_approved: !!(data as any).is_approved,
           is_admin: !!(data as any).is_admin,
         });

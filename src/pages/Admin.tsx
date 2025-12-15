@@ -133,6 +133,10 @@ const Admin = () => {
     try { await supabase.from("birthday_congrats").delete().or(`from_user_id.eq.${userId},birthday_user_id.eq.${userId}`); } catch (_e) { String(_e); }
     const { error } = await supabase.from("profiles").delete().eq("id", userId);
     if (error) throw error;
+    // Excluir identidade do Auth (email alias em auth.users) via Edge Function com chave de serviço
+    try {
+      await supabase.functions.invoke("admin-delete-user", { body: { user_id: userId } });
+    } catch (_e) { String(_e); }
   };
 
   const handleDeleteMember = async (userId: string) => {

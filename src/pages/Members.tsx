@@ -18,6 +18,8 @@ type MemberRow = {
   birthdate: string | null;
   is_approved: boolean | null;
   region_label: string | null;
+  musical_likes: string[] | null;
+  event_likes: string[] | null;
 };
 
 type SortMode = "name_asc" | "name_desc" | "birthday_upcoming";
@@ -46,7 +48,7 @@ export default function Members() {
       setLoading(true);
       let q = supabase
         .from("profiles")
-        .select("id,full_name,avatar_url,instagram,birthdate,is_approved,region_label")
+        .select("id,full_name,avatar_url,instagram,birthdate,is_approved,region_label,musical_likes,event_likes")
         .eq("is_approved", true);
 
       // server-side name filter
@@ -190,6 +192,20 @@ export default function Members() {
                     return s.length > 0 ? s : "Sem informações";
                   })()}
                 </div>
+                {(((m.musical_likes ?? []).length > 0) || ((m.event_likes ?? []).length > 0)) && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {(m.musical_likes ?? []).slice(0, 3).map((x) => (
+                      <span key={`ml-${m.id}-${x}`} className="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] bg-emerald-600/15 border border-emerald-500/30 text-emerald-200">
+                        {x}
+                      </span>
+                    ))}
+                    {(m.event_likes ?? []).slice(0, 3).map((x) => (
+                      <span key={`el-${m.id}-${x}`} className="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] bg-sky-600/15 border border-sky-500/30 text-sky-200">
+                        {x}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </Card>
           </button>

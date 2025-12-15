@@ -21,7 +21,7 @@ export const Header = () => {
         </Link>
 
         <h1 className="text-2xl sm:text-3xl md:text-4xl leading-none tracking-wide font-extrabold bg-gradient-to-r from-emerald-400 to-sky-500 bg-clip-text text-transparent">
-          <Link to="/" className="inline-block">CAPS</Link>
+          <Link to="/" className="inline-block">Rejeitados pelo CAPS</Link>
         </h1>
 
         <div className="flex items-center gap-2">
