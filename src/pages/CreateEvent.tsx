@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Upload, Calendar as CalendarIcon, Clock as ClockIcon } from "lucide-react";
+import { ArrowLeft, Upload, Calendar as CalendarIcon, Clock as ClockIcon, ChevronDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,12 +9,14 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthRole } from "@/hooks/useAuthRole";
 import { supabase } from "@/lib/supabase";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 const EVENT_COVER_BUCKET = "event-covers";
 
@@ -31,34 +33,221 @@ const CreateEvent = () => {
   // Removido: status do rolê não será mais usado na UI
   const { toast } = useToast();
   const { permissions, flags, profile } = useAuthRole();
-  const [venues, setVenues] = useState<Array<{ id: string; name: string; address_text: string | null; instagram_url: string | null }>>([]);
+  type VenueRow = { id: string; name: string; address_text: string | null; instagram_url: string | null; transit_line: string | null; transit_station: string | null };
+  const [venues, setVenues] = useState<VenueRow[]>([]);
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
   const [showNewVenue, setShowNewVenue] = useState(false);
+  const [newVenueDialogOpen, setNewVenueDialogOpen] = useState(false);
   const [newVenueName, setNewVenueName] = useState("");
   const [newVenueAddress, setNewVenueAddress] = useState("");
   const [newVenueInstagram, setNewVenueInstagram] = useState("");
+  const [newVenueTransitLine, setNewVenueTransitLine] = useState<string | null>("Não sei");
+  const [newVenueTransitStation, setNewVenueTransitStation] = useState<string | null>(null);
+  const [lineOpen, setLineOpen] = useState(false);
+  const [stationOpen, setStationOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<string | null>(null);
   const [selectedMinute, setSelectedMinute] = useState<string | null>(null);
   const selectedTimeStr = useMemo(() => (selectedHour && selectedMinute ? `${selectedHour}:${selectedMinute}` : ""), [selectedHour, selectedMinute]);
   const [extraKind, setExtraKind] = useState<"none" | "esquenta" | "after">("none");
   const [extraLocation, setExtraLocation] = useState<string>("");
+  // Estação de metrô/trem próxima (São Paulo) - seleção em dois níveis
+  const spTransit: Record<string, string[]> = {
+    "Linha Amarela (4) • Metrô": [
+      "Luz",
+      "República",
+      "Higienópolis–Mackenzie",
+      "Paulista",
+      "Oscar Freire",
+      "Fradique Coutinho",
+      "Faria Lima",
+      "Pinheiros",
+      "Butantã",
+      "São Paulo–Morumbi",
+      "Vila Sônia",
+    ],
+    "Linha Azul (1) • Metrô": [
+      "Jabaquara",
+      "Conceição",
+      "São Judas",
+      "Saúde",
+      "Praça da Árvore",
+      "Santa Cruz",
+      "Ana Rosa",
+      "Paraíso",
+      "Liberdade",
+      "São Joaquim",
+      "Sé",
+      "Tiradentes",
+      "Armênia",
+      "Portuguesa–Tietê",
+      "Carandiru",
+      "Santana",
+      "Jardim São Paulo–Ayres",
+      "Parada Inglesa",
+      "Tucuruvi",
+    ],
+    "Linha Verde (2) • Metrô": [
+      "Vila Prudente",
+      "Tamanduateí",
+      "Sacomã",
+      "Alto do Ipiranga",
+      "Santos–Imigrantes",
+      "Chácara Klabin",
+      "Ana Rosa",
+      "Paraíso",
+      "Brigadeiro",
+      "Trianon–Masp",
+      "Consolação",
+      "Clínicas",
+      "Sumaré",
+      "Vila Madalena",
+    ],
+    "Linha Vermelha (3) • Metrô": [
+      "Palmeiras–Barra Funda",
+      "Marechal Deodoro",
+      "Santa Cecília",
+      "República",
+      "Anhangabaú",
+      "Sé",
+      "Pedro II",
+      "Brás",
+      "Tatuapé",
+      "Carrão",
+      "Penha",
+      "Vila Matilde",
+      "Guilhermina–Esperança",
+      "Patriarca",
+      "Artur Alvim",
+      "Corinthians–Itaquera",
+    ],
+    "Linha Lilás (5) • Metrô": [
+      "Capão Redondo",
+      "Campo Limpo",
+      "Vila das Belezas",
+      "Giovanni Gronchi",
+      "Santo Amaro",
+      "Largo Treze",
+      "Adolfo Pinheiro",
+      "Alto da Boa Vista",
+      "Borba Gato",
+      "Brooklin",
+      "Campo Belo",
+      "Eucaliptos",
+      "Moema",
+      "AACD–Servidor",
+      "Hospital São Paulo",
+      "Chácara Klabin",
+    ],
+    "Linha Prata (15) • Monotrilho": [
+      "Vila Prudente",
+      "Oratório",
+      "São Lucas",
+      "Camilo Haddad",
+      "Vila Tolstói",
+      "Vila União",
+      "Jardim Planalto",
+      "Sapopemba",
+      "Fazenda da Juta",
+      "São Mateus",
+      "Jardim Colonial",
+      "Iguatemi",
+      "Jequiriçá",
+      "Jardim Helena",
+      "Paulo Freire",
+    ],
+    "Linha Esmeralda (9) • CPTM": [
+      "Osasco",
+      "Presidente Altino",
+      "Ceasa",
+      "Cidade Universitária",
+      "Pinheiros",
+      "Hebraica–Rebouças",
+      "Cidade Jardim",
+      "Vila Olímpia",
+      "Berrini",
+      "Morumbi",
+      "Granja Julieta",
+      "Socorro",
+      "Santo Amaro",
+      "Jurubatuba",
+    ],
+    "Linha Diamante (8) • CPTM": [
+      "Júlio Prestes",
+      "Palmeiras–Barra Funda",
+      "Lapa",
+      "Domingos de Moraes",
+      "Imperatriz Leopoldina",
+      "Osasco",
+      "Comandante Sampaio",
+      "Quitaúna",
+      "Carapicuíba",
+      "Barueri",
+      "Jandira",
+      "Itapevi",
+    ],
+    "Linha Coral (11) • CPTM": [
+      "Luz",
+      "Brás",
+      "Tatuapé",
+      "Itaquera",
+      "Guaianases",
+      "Ferraz de Vasconcelos",
+      "Poá",
+      "Suzano",
+      "Mogi das Cruzes",
+      "Estudantes",
+    ],
+    "Linha Safira (12) • CPTM": [
+      "Brás",
+      "Tatuapé",
+      "Itaquera",
+      "Jardim Romano",
+      "Itaim Paulista",
+      "Jardim Helena–Vila Mara",
+      "São Miguel Paulista",
+    ],
+    "Linha Turquesa (10) • CPTM": [
+      "Brás",
+      "Mooca",
+      "Ipiranga",
+      "Tamanduateí",
+      "Prefeito Saladino",
+      "Utinga",
+      "Capuava",
+      "Mauá",
+    ],
+    "Linha Jade (13) • CPTM": [
+      "Engenheiro Goulart",
+      "Guarulhos–Cecap",
+      "Aeroporto–Guarulhos",
+    ],
+  };
+  const [selectedTransitLine, setSelectedTransitLine] = useState<string | null>(null);
+  const [selectedTransitStation, setSelectedTransitStation] = useState<string | null>(null);
 
   useEffect(() => {
     const loadVenues = async () => {
       const { data, error } = await supabase
         .from("venues")
-        .select("id,name,address_text,instagram_url")
+        .select("id,name,address_text,instagram_url,transit_line,transit_station")
         .order("name", { ascending: true });
       if (error) {
         // Apenas notifica, não bloqueia o fluxo
         toast({ title: "Falha ao carregar rolês salvos", description: error.message });
         return;
       }
-      setVenues(data ?? []);
+      setVenues((data ?? []).map((v: { id: string; name: string; address_text: string | null; instagram_url: string | null; transit_line: string | null; transit_station: string | null }) => ({
+        id: v.id,
+        name: v.name,
+        address_text: v.address_text ?? null,
+        instagram_url: v.instagram_url ?? null,
+        transit_line: v.transit_line ?? null,
+        transit_station: v.transit_station ?? null,
+      })));
     };
     loadVenues();
-  }, []);
+  }, [toast]);
 
   const filteredVenues = useMemo(() => {
     const q = eventName.trim().toLowerCase();
@@ -163,20 +352,27 @@ const CreateEvent = () => {
             .from(EVENT_COVER_BUCKET)
             .getPublicUrl(path);
           coverPublicUrl = publicData.publicUrl;
-        } catch (err: any) {
-          toast({ title: "Erro ao enviar capa", description: err?.message ?? String(err), variant: "destructive" });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          toast({ title: "Erro ao enviar capa", description: msg, variant: "destructive" });
           return;
         }
 
         // Mapeia para colunas reais da tabela public.events
-        const payload: Record<string, any> = {
+        // Anexa informação de transporte (linha/estação) ao campo de localização para persistência sem alterar schema
+        const transitSuffix =
+          selectedTransitLine && selectedTransitStation
+            ? ` • Próx. ${selectedTransitLine} — ${selectedTransitStation}`
+            : "";
+        const locationTextFinal = (locationName || "") + transitSuffix;
+        const payload: Record<string, unknown> = {
           title: eventName,
           description,
           requirements: requirements || null,
           aux_links: auxLinks || null,
           cover_image_url: coverPublicUrl,
           event_timestamp: eventTimestamp,
-          location_text: locationName || null,
+          location_text: locationTextFinal || null,
           instagram_url: instagramUrl || null,
           venue_id: selectedVenueId || null,
           created_by: profile?.id ?? null,
@@ -256,6 +452,8 @@ const CreateEvent = () => {
                         setEventName(v.name);
                         setLocationName(v.address_text ?? "");
                         setInstagramUrl(v.instagram_url ?? "");
+                        setSelectedTransitLine(v.transit_line ?? null);
+                        setSelectedTransitStation(v.transit_station ?? null);
                         setShowNewVenue(false);
                       }}
                     >
@@ -268,11 +466,14 @@ const CreateEvent = () => {
                       type="button"
                       className="w-full text-left text-xs text-white/80 hover:bg-white/10 px-2 py-2 rounded"
                       onClick={() => {
-                        setShowNewVenue(true);
                         setNewVenueName(eventName.trim());
+                        setNewVenueAddress("");
+                        setNewVenueInstagram("");
+                        setShowNewVenue(false);
+                        setNewVenueDialogOpen(true);
                       }}
                     >
-                      Cadastrar novo rolê com este nome
+                      Cadastrar novo Local com este nome
                     </button>
                   </div>
                 </div>
@@ -309,57 +510,202 @@ const CreateEvent = () => {
               variant="outline"
               className="h-9 px-3 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
               onClick={() => {
-                setShowNewVenue(true);
                 setNewVenueName(eventName.trim());
+                setNewVenueAddress("");
+                setNewVenueInstagram("");
+                setShowNewVenue(false);
+                setNewVenueDialogOpen(true);
               }}
             >
-              Cadastrar novo rolê
+              Cadastrar novo Local
             </Button>
           </div>
-          {showNewVenue && (
-            <div className="mt-2 space-y-2">
-              <Input id="inline-new-venue-name-below" value={newVenueName} onChange={(e) => setNewVenueName(e.target.value)} className="bg-white/10 border-white/20 text-white placeholder:text-white/60" placeholder="Nome do rolê" />
-              <Input id="inline-new-venue-address-below" value={newVenueAddress} onChange={(e) => setNewVenueAddress(e.target.value)} className="bg-white/10 border-white/20 text-white placeholder:text-white/60" placeholder="Endereço" />
-              <Input id="inline-new-venue-instagram-below" value={newVenueInstagram} onChange={(e) => setNewVenueInstagram(e.target.value)} className="bg-white/10 border-white/20 text-white placeholder:text-white/60" placeholder="Instagram / Site" />
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="border-white/30 text-white hover:bg-white/10"
-                  onClick={async () => {
-                    if (!newVenueName.trim()) {
-                      toast({ title: "Informe o nome do rolê", description: "Campo nome é obrigatório." });
-                      return;
-                    }
-                    const { data, error } = await supabase
-                      .from("venues")
-                      .insert({ name: newVenueName.trim(), address_text: newVenueAddress.trim() || null, instagram_url: newVenueInstagram.trim() || null, created_by: profile?.id ?? null })
-                      .select("id,name,address_text,instagram_url")
-                      .maybeSingle();
-                    if (error) {
-                      toast({ title: "Erro ao cadastrar rolê", description: error.message });
-                      return;
-                    }
-                    if (data) {
-                      setVenues((prev) => [...prev, data]);
-                      setSelectedVenueId(data.id);
-                      setEventName(data.name);
-                      setLocationName(data.address_text ?? "");
-                      setInstagramUrl(data.instagram_url ?? "");
-                      setShowNewVenue(false);
-                      setNewVenueName("");
-                      setNewVenueAddress("");
-                      setNewVenueInstagram("");
-                      toast({ title: "Rolê cadastrado", description: "Dados aplicados ao formulário." });
-                    }
-                  }}
-                >
-                  Salvar novo rolê
-                </Button>
-                <Button type="button" variant="ghost" className="text-white/80" onClick={() => setShowNewVenue(false)}>Cancelar</Button>
+          
+          {/* Popup para cadastrar novo rolê */}
+          <Dialog open={newVenueDialogOpen} onOpenChange={setNewVenueDialogOpen}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Cadastrar novo Local</DialogTitle>
+                <DialogDescription>Salve o local para aplicar no formulário e continuar a criação.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="new-venue-name" className="text-white">Apenas o nome do Local</Label>
+                  <Input
+                    id="new-venue-name"
+                    value={newVenueName}
+                    onChange={(e) => setNewVenueName(e.target.value)}
+                    placeholder="Ex: BLITZ HOUZ"
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-venue-address" className="text-white">Endereço</Label>
+                  <Input
+                    id="new-venue-address"
+                    value={newVenueAddress}
+                    onChange={(e) => setNewVenueAddress(e.target.value)}
+                    placeholder="Rua, número, bairro, cidade"
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-venue-instagram" className="text-white">Instagram / Site</Label>
+                  <Input
+                    id="new-venue-instagram"
+                    value={newVenueInstagram}
+                    onChange={(e) => setNewVenueInstagram(e.target.value)}
+                    placeholder="@perfil ou https://site.com"
+                    className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-white">Estação mais próxima (Metrô/CPTM)</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-white/80">Linha</Label>
+                      <Popover open={lineOpen} onOpenChange={setLineOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full justify-between bg-white/10 border-white/20 text-white hover:bg-white/10"
+                          >
+                            {newVenueTransitLine ?? "Não sei"}
+                            <ChevronDown className="h-4 w-4 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="p-0 w-[320px] max-h-[60vh] bg-popover text-popover-foreground" style={{ zIndex: 1400 }}>
+                          <Command>
+                            <CommandInput placeholder="Buscar linha..." />
+                            <CommandList className="max-h-[50vh] overflow-y-auto">
+                              <CommandEmpty>Nenhuma linha encontrada</CommandEmpty>
+                              <CommandGroup>
+                                <CommandItem
+                                  onSelect={() => {
+                                    setNewVenueTransitLine("Não sei");
+                                    setNewVenueTransitStation(null);
+                                    setLineOpen(false);
+                                  }}
+                                >
+                                  Não sei
+                                </CommandItem>
+                                {Object.keys(spTransit).map((ln) => (
+                                  <CommandItem
+                                    key={ln}
+                                    onSelect={() => {
+                                      setNewVenueTransitLine(ln);
+                                      setNewVenueTransitStation(null);
+                                      setLineOpen(false);
+                                    }}
+                                  >
+                                    {ln}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-white/80">Estação</Label>
+                      <Popover open={stationOpen} onOpenChange={setStationOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!newVenueTransitLine || newVenueTransitLine === "Não sei"}
+                            className="w-full justify-between bg-white/10 border-white/20 text-white hover:bg-white/10 disabled:opacity-50"
+                          >
+                            {newVenueTransitStation ?? (newVenueTransitLine && newVenueTransitLine !== "Não sei" ? "Selecione a estação" : "Não sei")}
+                            <ChevronDown className="h-4 w-4 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="p-0 w-[320px] max-h-[60vh] bg-popover text-popover-foreground" style={{ zIndex: 1400 }}>
+                          <Command>
+                            <CommandInput placeholder="Buscar estação..." />
+                            <CommandList className="max-h-[50vh] overflow-y-auto">
+                              <CommandEmpty>Nenhuma estação encontrada</CommandEmpty>
+                              <CommandGroup>
+                                {(newVenueTransitLine && newVenueTransitLine !== "Não sei" ? spTransit[newVenueTransitLine] : []).map((st) => (
+                                  <CommandItem
+                                    key={st}
+                                    onSelect={() => {
+                                      setNewVenueTransitStation(st);
+                                      setStationOpen(false);
+                                    }}
+                                  >
+                                    {st}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                  </div>
+                  <div className="text-xs text-white/50">Essa informação será anexada ao campo de localização do rolê.</div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    className="bg-black/80 text-white hover:bg-black border border-white/20"
+                    onClick={() => setNewVenueDialogOpen(false)}
+                  >
+                    Fechar
+                  </Button>
+                  <Button
+                    type="button"
+                    className="bg-emerald-600 text-white hover:bg-emerald-700 font-semibold"
+                    onClick={async () => {
+                      if (!newVenueName.trim()) {
+                        toast({ title: "Informe o nome do local", description: "Campo nome é obrigatório." });
+                        return;
+                      }
+                      const { data, error } = await supabase
+                        .from("venues")
+                        .insert({
+                          name: newVenueName.trim(),
+                          address_text: newVenueAddress.trim() || null,
+                          instagram_url: newVenueInstagram.trim() || null,
+                          transit_line: newVenueTransitLine === "Não sei" ? null : (newVenueTransitLine ?? null),
+                          transit_station: newVenueTransitLine === "Não sei" ? null : (newVenueTransitStation ?? null),
+                          created_by: profile?.id ?? null,
+                        })
+                        .select("id,name,address_text,instagram_url,transit_line,transit_station")
+                        .maybeSingle();
+                      if (error) {
+                        toast({ title: "Erro ao cadastrar Local", description: error.message });
+                        return;
+                      }
+                      if (data) {
+                        const d = data as VenueRow;
+                        setVenues((prev) => [...prev, d]);
+                        setSelectedVenueId(d.id);
+                        setEventName(d.name);
+                        setLocationName(d.address_text ?? "");
+                        setInstagramUrl(d.instagram_url ?? "");
+                        setSelectedTransitLine(d.transit_line ?? null);
+                        setSelectedTransitStation(d.transit_station ?? null);
+                        setNewVenueDialogOpen(false);
+                        setShowNewVenue(false);
+                        setNewVenueName("");
+                        setNewVenueAddress("");
+                        setNewVenueInstagram("");
+                        setNewVenueTransitLine("Não sei");
+                        setNewVenueTransitStation(null);
+                        toast({ title: "Local cadastrado", description: "Dados aplicados ao formulário." });
+                      }
+                    }}
+                  >
+                    Salvar e aplicar
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            </DialogContent>
+          </Dialog>
           {/* Campos de Endereço/Site serão definidos ao selecionar uma sugestão ou ao cadastrar um novo rolê via painel inline acima. */}
           {/* Formulário inline de novo rolê agora aparece dentro do painel de sugestões acima. */}
         </div>
@@ -410,7 +756,16 @@ const CreateEvent = () => {
 
             <div className="space-y-2">
               <Label className="text-white">Vai ter</Label>
-              <ToggleGroup type="single" value={extraKind} onValueChange={(v) => { if (v) { setExtraKind(v as any); if (v === "none") setExtraLocation(""); } }}>
+              <ToggleGroup
+                type="single"
+                value={extraKind}
+                onValueChange={(v) => {
+                  if (v === "none" || v === "esquenta" || v === "after") {
+                    setExtraKind(v);
+                    if (v === "none") setExtraLocation("");
+                  }
+                }}
+              >
                 <ToggleGroupItem value="esquenta" className="bg-white/10 border-white/20 text-white hover:bg-white/10">Esquenta</ToggleGroupItem>
                 <ToggleGroupItem value="after" className="bg-white/10 border-white/20 text-white hover:bg-white/10">After</ToggleGroupItem>
                 <ToggleGroupItem value="none" className="bg-white/10 border-white/20 text-white hover:bg-white/10">Nenhum</ToggleGroupItem>
@@ -555,9 +910,9 @@ const CreateEvent = () => {
                   </div>
             </div>
           )}
-        </div>
+            </div>
 
-            <div className="h-px bg-white/10" />
+            {/* Removido: Estação mais próxima — agora parte do popup 'Cadastrar novo Local' */}
 
             {/* Campos de Local/Instagram removidos desta seção para evitar redundância */}
           </div>

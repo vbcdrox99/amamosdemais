@@ -10,11 +10,18 @@ import { useAuthRole } from "@/hooks/useAuthRole";
 import { supabase } from "@/lib/supabase";
 import { signOut } from "@/lib/auth";
 import { formatPhoneBR, extractInstagramHandle, formatInstagramDisplay } from "@/lib/utils";
+import { ChevronDown } from "lucide-react";
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
 
 const Profile = () => {
   const { flags, profile, session, permissions } = useAuthRole() as any;
   const navigate = useNavigate();
   const { toast } = useToast();
+  const truncateWords = (text: string | null | undefined, max: number) => {
+    if (!text) return "";
+    const parts = text.split(/\s+/).filter((w) => w.length > 0);
+    return parts.length > max ? `${parts.slice(0, max).join(" ")}…` : text;
+  };
   const [fullName, setFullName] = useState<string>("");
   const [instagram, setInstagram] = useState<string>("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -24,6 +31,38 @@ const Profile = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [rsvps, setRsvps] = useState<Array<{ event_id: number; status: "going" | "maybe" | "not-going"; checkin_confirmed: boolean | null; events?: { id: number; title: string | null; event_timestamp: string | null; location_text: string | null } | null }>>([]);
   const [loadingRsvps, setLoadingRsvps] = useState(false);
+  const capitalZones = [
+    { code: "ZL", label: "Zona Leste" },
+    { code: "ZN", label: "Zona Norte" },
+    { code: "ZO", label: "Zona Oeste" },
+    { code: "ZS", label: "Zona Sul" },
+    { code: "Centro", label: "Centro" },
+  ];
+  const capitalAreasByZone: Record<string, string[]> = {
+    ZL: [
+      "Itaquera","Tatuapé","Vila Prudente","Mooca","Penha","São Mateus","São Miguel Paulista","Guaianases","Cidade Tiradentes",
+      "Ermelino Matarazzo","Aricanduva","Sapopemba","Belém","Carrão","Água Rasa","Parque do Carmo","Patriarca","Vila Formosa"
+    ],
+    ZN: [
+      "Santana","Tucuruvi","Mandaqui","Casa Verde","Cachoeirinha","Limão","Freguesia do Ó","Brasilândia","Jaçanã","Tremembé",
+      "Vila Maria","Vila Guilherme","Vila Medeiros","Parada Inglesa","Horto Florestal"
+    ],
+    ZO: [
+      "Lapa","Perdizes","Pompéia","Vila Leopoldina","Pinheiros","Alto de Pinheiros","Butantã","Jaguaré","Rio Pequeno","Morumbi","Vila Sônia"
+    ],
+    ZS: [
+      "Santo Amaro","Campo Belo","Brooklin","Moema","Ipiranga","Jabaquara","Saúde","Vila Mariana","Capão Redondo","Campo Limpo",
+      "Jardim Ângela","Grajaú","Cidade Ademar","Pedreira","Parelheiros","Marsilac","Socorro","Interlagos"
+    ],
+    Centro: [
+      "Sé","República","Consolação","Bela Vista","Liberdade","Santa Cecília","Cambuci","Bom Retiro"
+    ]
+  };
+  const metroCities = ["Santo André", "São Bernardo do Campo", "São Caetano do Sul", "Mogi das Cruzes", "Osasco", "Barueri", "Carapicuíba", "Itapevi", "Jandira", "Cotia", "Embu das Artes", "Guarulhos", "Diadema", "Mauá", "Ribeirão Pires", "Rio Grande da Serra"];
+  const [livingMode, setLivingMode] = useState<"capital" | "metro">("capital");
+  const [capitalZone, setCapitalZone] = useState<string>("");
+  const [capitalArea, setCapitalArea] = useState<string>("");
+  const [metroCity, setMetroCity] = useState<string>("");
 
   useEffect(() => {
     if (!flags.isAuthenticated) return;
@@ -42,7 +81,38 @@ const Profile = () => {
     } else {
       setBirthdateInput("");
     }
-  }, [flags.isAuthenticated, profile?.full_name, profile?.instagram, profile?.avatar_url]);
+    const rl = profile?.region_label ?? "";
+    if (rl) {
+      const isMetro = metroCities.includes(rl);
+      if (isMetro) {
+        setLivingMode("metro");
+        setMetroCity(rl);
+        setCapitalArea("");
+        setCapitalZone("");
+      } else if (rl.includes("—")) {
+        const parts = rl.split("—");
+        const area = (parts[0] || "").trim();
+        const zoneRaw = (parts[1] || "").trim();
+        const byLabel = capitalZones.find((z) => z.label === zoneRaw);
+        const byCode = capitalZones.find((z) => z.code === zoneRaw);
+        const zoneCode = byLabel?.code ?? byCode?.code ?? "";
+        setLivingMode("capital");
+        setCapitalArea(area);
+        setCapitalZone(zoneCode);
+        setMetroCity("");
+      } else {
+        setLivingMode("capital");
+        setCapitalArea(rl);
+        setCapitalZone("");
+        setMetroCity("");
+      }
+    } else {
+      setLivingMode("capital");
+      setCapitalArea("");
+      setCapitalZone("");
+      setMetroCity("");
+    }
+  }, [flags.isAuthenticated, profile?.full_name, profile?.instagram, profile?.avatar_url, profile?.region_label]);
 
   // Idade calculada a partir do birthdate ISO (yyyy-mm-dd)
   const age = useMemo(() => {
@@ -152,6 +222,17 @@ const Profile = () => {
       } else {
         updatePayload.birthdate = null;
       }
+      let regionLabel: string | null = null;
+      if (livingMode === "capital") {
+        const area = (capitalArea || "").trim();
+        const zone = (capitalZone || "").trim();
+        const zoneLabel = capitalZones.find((z) => z.code === zone)?.label || "";
+        if (area && zoneLabel) regionLabel = `${area} — ${zoneLabel}`;
+        else if (area) regionLabel = area;
+      } else {
+        regionLabel = metroCity || null;
+      }
+      updatePayload.region_label = regionLabel;
 
       const { error } = await supabase
         .from("profiles")
@@ -210,7 +291,7 @@ const Profile = () => {
         <CardContent className="space-y-6">
           <div className="space-y-3">
             <Label>Foto de perfil</Label>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
               <Avatar className="h-16 w-16 ring-1 ring-white/20">
                 {avatarUrl ? (
                   <AvatarImage src={avatarUrl} alt="Avatar" />
@@ -221,7 +302,7 @@ const Profile = () => {
                   {(fullName || formatPhoneBR(profile?.phone_number || "") || "?")?.slice(0, 2).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 w-full sm:w-auto">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -232,7 +313,7 @@ const Profile = () => {
                 <Button
                   variant="outline"
                   onClick={() => fileInputRef.current?.click()}
-                  className="h-9 px-3 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
+                  className="h-10 px-3 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30 w-full sm:w-auto"
                 >
                   Alterar foto
                 </Button>
@@ -283,11 +364,67 @@ const Profile = () => {
               inputMode="numeric"
             />
           </div>
-          <div className="flex gap-2">
-            <Button onClick={handleSave} disabled={saving} className="h-9 px-3 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30">
+          <div className="space-y-2">
+            <Label>Região onde mora</Label>
+            <Select value={livingMode} onValueChange={(v) => setLivingMode(v as "capital" | "metro")}>
+              <SelectTrigger className="bg-black/30 border-white/20 text-white hover:bg-white/10">
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="capital">Capital (São Paulo)</SelectItem>
+                <SelectItem value="metro">Cidades Metropolitanas</SelectItem>
+              </SelectContent>
+            </Select>
+            {livingMode === "capital" ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Zona</Label>
+                  <Select value={capitalZone} onValueChange={(v) => { setCapitalZone(v); setCapitalArea(""); }}>
+                    <SelectTrigger className="bg-black/30 border-white/20 text-white hover:bg-white/10">
+                      <SelectValue placeholder="Selecione" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {capitalZones.map((z) => (
+                        <SelectItem key={z.code} value={z.code}>{z.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Bairro/Região</Label>
+                  <Select value={capitalArea} onValueChange={(v) => setCapitalArea(v)} disabled={!capitalZone}>
+                    <SelectTrigger className="bg-black/30 border-white/20 text-white hover:bg-white/10 disabled:opacity-50">
+                      <SelectValue placeholder={capitalZone ? "Selecione" : "Escolha a zona primeiro"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(capitalZone ? capitalAreasByZone[capitalZone] : []).map((area) => (
+                        <SelectItem key={area} value={area}>{area}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <Label>Cidade Metropolitana</Label>
+                <Select value={metroCity} onValueChange={(v) => setMetroCity(v)}>
+                  <SelectTrigger className="bg-black/30 border-white/20 text-white hover:bg-white/10">
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {metroCities.map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:flex sm:gap-2">
+            <Button onClick={handleSave} disabled={saving} className="h-10 px-3 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30 w-full sm:w-auto">
               {saving ? "Salvando..." : "Salvar"}
-        </Button>
-        <Button variant="outline" onClick={handleLogout} className="ml-auto">
+            </Button>
+        <Button variant="outline" onClick={handleLogout} className="w-full sm:w-auto sm:ml-auto h-10">
           Sair
         </Button>
       </div>
@@ -318,7 +455,7 @@ const Profile = () => {
                       {checkins.map((r) => (
                         <Link key={`c-${r.event_id}`} to={`/evento/${r.events?.id ?? r.event_id}`} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                          <span className="text-foreground">{r.events?.title ?? `Rolê ${r.event_id}`}</span>
+                          <span className="text-foreground truncate max-w-[70vw] sm:max-w-none">{truncateWords(r.events?.title ?? `Rolê ${r.event_id}`, 6)}</span>
                         </Link>
                       ))}
                     </div>
@@ -333,7 +470,7 @@ const Profile = () => {
                       {going.map((r) => (
                         <Link key={`g-${r.event_id}`} to={`/evento/${r.events?.id ?? r.event_id}`} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-500/30">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                          <span className="text-foreground">{r.events?.title ?? `Rolê ${r.event_id}`}</span>
+                          <span className="text-foreground truncate max-w-[70vw] sm:max-w-none">{truncateWords(r.events?.title ?? `Rolê ${r.event_id}`, 6)}</span>
                         </Link>
                       ))}
                     </div>
@@ -348,7 +485,7 @@ const Profile = () => {
                       {maybe.map((r) => (
                         <Link key={`m-${r.event_id}`} to={`/evento/${r.events?.id ?? r.event_id}`} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs bg-amber-600/10 hover:bg-amber-600/20 border border-amber-500/30">
                           <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
-                          <span className="text-foreground">{r.events?.title ?? `Rolê ${r.event_id}`}</span>
+                          <span className="text-foreground truncate max-w-[70vw] sm:max-w-none">{truncateWords(r.events?.title ?? `Rolê ${r.event_id}`, 6)}</span>
                         </Link>
                       ))}
                     </div>
@@ -363,7 +500,7 @@ const Profile = () => {
                       {notGoing.map((r) => (
                         <Link key={`n-${r.event_id}`} to={`/evento/${r.events?.id ?? r.event_id}`} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs bg-rose-600/10 hover:bg-rose-600/20 border border-rose-500/30">
                           <span className="h-1.5 w-1.5 rounded-full bg-rose-300" />
-                          <span className="text-foreground">{r.events?.title ?? `Rolê ${r.event_id}`}</span>
+                          <span className="text-foreground truncate max-w-[70vw] sm:max-w-none">{truncateWords(r.events?.title ?? `Rolê ${r.event_id}`, 6)}</span>
                         </Link>
                       ))}
                     </div>

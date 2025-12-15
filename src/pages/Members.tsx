@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import ProfileQuickView from "@/components/profile/ProfileQuickView";
 import { Users, RefreshCcw } from "lucide-react";
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
 
 type MemberRow = {
   id: string;
@@ -16,6 +17,7 @@ type MemberRow = {
   instagram: string | null;
   birthdate: string | null;
   is_approved: boolean | null;
+  region_label: string | null;
 };
 
 type SortMode = "name_asc" | "name_desc" | "birthday_upcoming";
@@ -44,7 +46,7 @@ export default function Members() {
       setLoading(true);
       let q = supabase
         .from("profiles")
-        .select("id,full_name,avatar_url,instagram,birthdate,is_approved")
+        .select("id,full_name,avatar_url,instagram,birthdate,is_approved,region_label")
         .eq("is_approved", true);
 
       // server-side name filter
@@ -137,19 +139,21 @@ export default function Members() {
             placeholder="Buscar por nome"
             aria-label="Buscar membros"
           />
-          <select
-            value={sortMode}
-            onChange={(e) => setSortMode(e.target.value as SortMode)}
-            className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/90"
-            aria-label="Ordenar"
-          >
-            <option value="name_asc">Nome (A–Z)</option>
-            <option value="name_desc">Nome (Z–A)</option>
-            <option value="birthday_upcoming">Aniversários próximos</option>
-          </select>
-          <Button variant="outline" onClick={() => loadMembers(false)} disabled={!hasMore || loading}>
-            {loading ? "Carregando..." : hasMore ? "Carregar mais" : "Tudo carregado"}
-          </Button>
+          <Select value={sortMode} onValueChange={(v) => setSortMode(v as SortMode)}>
+            <SelectTrigger className="bg-black/30 border-white/20 text-white hover:bg-white/10" aria-label="Ordenar">
+              <SelectValue placeholder="Ordenar" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name_asc">Nome (A–Z)</SelectItem>
+              <SelectItem value="name_desc">Nome (Z–A)</SelectItem>
+              <SelectItem value="birthday_upcoming">Aniversários próximos</SelectItem>
+            </SelectContent>
+          </Select>
+          {hasMore && (
+            <Button variant="outline" onClick={() => loadMembers(false)} disabled={loading}>
+              {loading ? "Carregando..." : "Carregar mais"}
+            </Button>
+          )}
         </div>
       </Card>
 
@@ -174,7 +178,17 @@ export default function Members() {
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-white truncate">{m.full_name ?? "Nome não informado"}</div>
                 <div className="text-xs text-white/60">
-                  {m.birthdate ? "Aniversário cadastrado" : "Aniversário não informado"}
+                  {(() => {
+                    const parts: string[] = [];
+                    if (m.instagram) parts.push(`@${m.instagram}`);
+                    if (m.birthdate) {
+                      const [y, mm, dd] = (m.birthdate || "").split("-");
+                      if (y && mm && dd) parts.push(`${dd.padStart(2, "0")}/${mm.padStart(2, "0")}`);
+                    }
+                    if (m.region_label) parts.push(m.region_label);
+                    const s = parts.join(" • ");
+                    return s.length > 0 ? s : "Sem informações";
+                  })()}
                 </div>
               </div>
             </Card>
@@ -186,4 +200,3 @@ export default function Members() {
     </div>
   );
 }
-

@@ -50,7 +50,7 @@ const Home = () => {
   const [profileViewOpen, setProfileViewOpen] = useState(false);
   const [profileViewUserId, setProfileViewUserId] = useState<string | null>(null);
   const [congratsMap, setCongratsMap] = useState<Record<string, Array<{ userId: string; full_name: string | null; avatar_url: string | null }>>>({});
-  const { profile } = useAuthRole() as any;
+  const { profile, permissions } = useAuthRole() as any;
   // Contagem de participantes (going/maybe) por evento para evitar fetch por card
   const [hotCounts, setHotCounts] = useState<Record<string, number>>({});
   // Bumps temporários por interação (duração limitada) para reforçar relevância
@@ -891,19 +891,21 @@ const Home = () => {
           const timeStr = ts ? ts.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
           return (
             <Card className="p-4 border-emerald-500/40 bg-white/5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
+                <div className="flex-1 min-w-0">
                   <div className="text-white font-semibold">Check-in aberto</div>
-                  <div className="text-xs text-white/70">{ev.title} • {dateStr}{timeStr && ` às ${timeStr}`}</div>
+                  <div className="text-xs text-white/70">
+                    <span className="truncate inline-block max-w-[280px] sm:max-w-none">{ev.title}</span> • {dateStr}{timeStr && ` às ${timeStr}`}
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button size="sm" className="h-8" onClick={() => navigate(`/evento/${ev.id}`)}>
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-2 w-full sm:w-auto mt-3 sm:mt-0">
+                  <Button size="sm" className="h-9 w-full sm:w-auto" onClick={() => navigate(`/evento/${ev.id}`)}>
                     Ir ao evento
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8"
+                    className="h-9 w-full sm:w-auto"
                     onClick={async () => {
                       try {
                         const uid = (profile as any)?.id;
@@ -933,19 +935,21 @@ const Home = () => {
           const timeStr = ts ? ts.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
           return (
             <Card className="p-4 border-emerald-500/40 bg-white/5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
+                <div className="flex-1 min-w-0">
                   <div className="text-white font-semibold">Memória pendente</div>
-                  <div className="text-xs text-white/70">{ev.title} • {dateStr}{timeStr && ` às ${timeStr}`}</div>
+                  <div className="text-xs text-white/70">
+                    <span className="truncate inline-block max-w-[280px] sm:max-w-none">{ev.title}</span> • {dateStr}{timeStr && ` às ${timeStr}`}
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button size="sm" className="h-8" onClick={() => navigate(`/memorias?eventId=${ev.id}`)}>
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-2 w-full sm:w-auto mt-3 sm:mt-0">
+                  <Button size="sm" className="h-9 w-full sm:w-auto" onClick={() => navigate(`/memorias?eventId=${ev.id}`)}>
                     Abrir memórias
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8"
+                    className="h-9 w-full sm:w-auto"
                     onClick={async () => {
                       try {
                         const uid = (profile as any)?.id;
@@ -1002,6 +1006,10 @@ const Home = () => {
                     attendeeCount={hotCounts[String(row.id)] ?? 0}
                     isPast={isPast}
                     dayTag={dayTag}
+                    isAdmin={!!permissions?.canAccessAdmin}
+                    onDeleted={() => {
+                      setEvents((prev) => prev.filter((e) => String(e.id) !== String(row.id)));
+                    }}
                   />
                 </div>
               );

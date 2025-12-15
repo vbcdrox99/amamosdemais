@@ -26,6 +26,11 @@ export default function ProfileQuickView({ userId, open, onOpenChange, highlight
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ProfileRow | null>(null);
   const [rsvps, setRsvps] = useState<Array<{ event_id: number; status: "going" | "maybe" | "not-going"; checkin_confirmed: boolean | null; events?: { id: number; title: string | null } | null }>>([]);
+  const truncateWords = (s: string, n: number) => {
+    const words = s.trim().split(/\s+/);
+    if (words.length <= n) return s;
+    return words.slice(0, n).join(" ") + "…";
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -154,7 +159,7 @@ export default function ProfileQuickView({ userId, open, onOpenChange, highlight
                       {rsvps.filter((r) => !!r.checkin_confirmed).map((r) => (
                         <Link key={`c-${r.event_id}`} to={`/evento/${r.events?.id ?? r.event_id}`} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                          <span className="text-foreground">{r.events?.title ?? `Rolê ${r.event_id}`}</span>
+                          <span className="text-foreground">{truncateWords(r.events?.title ?? `Rolê ${r.event_id}`, 6)}</span>
                         </Link>
                       ))}
                     </div>
@@ -168,7 +173,7 @@ export default function ProfileQuickView({ userId, open, onOpenChange, highlight
                       {rsvps.filter((r) => r.status === "going" && !r.checkin_confirmed).map((r) => (
                         <Link key={`g-${r.event_id}`} to={`/evento/${r.events?.id ?? r.event_id}`} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-500/30">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                          <span className="text-foreground">{r.events?.title ?? `Rolê ${r.event_id}`}</span>
+                          <span className="text-foreground">{truncateWords(r.events?.title ?? `Rolê ${r.event_id}`, 6)}</span>
                         </Link>
                       ))}
                     </div>
@@ -182,7 +187,7 @@ export default function ProfileQuickView({ userId, open, onOpenChange, highlight
                       {rsvps.filter((r) => r.status === "maybe").map((r) => (
                         <Link key={`m-${r.event_id}`} to={`/evento/${r.events?.id ?? r.event_id}`} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs bg-amber-600/10 hover:bg-amber-600/20 border border-amber-500/30">
                           <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
-                          <span className="text-foreground">{r.events?.title ?? `Rolê ${r.event_id}`}</span>
+                          <span className="text-foreground">{truncateWords(r.events?.title ?? `Rolê ${r.event_id}`, 6)}</span>
                         </Link>
                       ))}
                     </div>
@@ -196,7 +201,7 @@ export default function ProfileQuickView({ userId, open, onOpenChange, highlight
                       {rsvps.filter((r) => r.status === "not-going").map((r) => (
                         <Link key={`n-${r.event_id}`} to={`/evento/${r.events?.id ?? r.event_id}`} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs bg-rose-600/10 hover:bg-rose-600/20 border border-rose-500/30">
                           <span className="h-1.5 w-1.5 rounded-full bg-rose-300" />
-                          <span className="text-foreground">{r.events?.title ?? `Rolê ${r.event_id}`}</span>
+                          <span className="text-foreground">{truncateWords(r.events?.title ?? `Rolê ${r.event_id}`, 6)}</span>
                         </Link>
                       ))}
                     </div>

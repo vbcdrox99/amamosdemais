@@ -5,7 +5,7 @@ import { useAuthRole } from "@/hooks/useAuthRole";
 import { Link } from "react-router-dom";
 
 export const Header = () => {
-  const [logoSrc, setLogoSrc] = useState("/AMAMOS DE MAIS.png");
+  const [logoSrc, setLogoSrc] = useState("/logo-caps.png");
   const { flags } = useAuthRole();
 
   return (
