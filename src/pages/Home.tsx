@@ -912,11 +912,27 @@ const Home = () => {
                         if (!uid) return;
                         const { error } = await supabase
                           .from("event_rsvps")
-                          .upsert({ event_id: Number(ev.id), user_id: uid, reminder_dismissed: true }, { onConflict: "event_id,user_id" });
-                        if (error) throw error;
-                        setRsvpByEvent((prev) => ({ ...prev, [String(ev.id)]: { ...(prev[String(ev.id)] ?? { status: null, checkin_confirmed: false, reminder_dismissed: false }), reminder_dismissed: true } }));
+                          .update({ reminder_dismissed: true })
+                          .eq("event_id", Number(ev.id))
+                          .eq("user_id", uid);
+                        
+                        if (error) {
+                          console.error("Erro ao fechar lembrete:", error);
+                          toast({ title: "Erro", description: "Não foi possível fechar o lembrete." });
+                          return;
+                        }
+                        
+                        setRsvpByEvent((prev) => ({ 
+                          ...prev, 
+                          [String(ev.id)]: { 
+                            ...(prev[String(ev.id)] ?? { status: null, checkin_confirmed: false, reminder_dismissed: false }), 
+                            reminder_dismissed: true 
+                          } 
+                        }));
                         setCheckinReminderEventId(null);
-                      } catch {}
+                      } catch (err) {
+                        console.error(err);
+                      }
                     }}
                   >Fechar</Button>
                 </div>
@@ -956,10 +972,20 @@ const Home = () => {
                         if (!uid) return;
                         const { error } = await supabase
                           .from("event_rsvps")
-                          .upsert({ event_id: Number(ev.id), user_id: uid, memory_reminder_dismissed: true }, { onConflict: "event_id,user_id" });
-                        if (error) throw error;
+                          .update({ memory_reminder_dismissed: true })
+                          .eq("event_id", Number(ev.id))
+                          .eq("user_id", uid);
+                        
+                        if (error) {
+                          console.error("Erro ao fechar lembrete:", error);
+                          toast({ title: "Erro", description: "Não foi possível fechar o lembrete." });
+                          return;
+                        }
+                        
                         setMemoryReminderEventId(null);
-                      } catch {}
+                      } catch (err) {
+                        console.error(err);
+                      }
                     }}
                   >Fechar</Button>
                 </div>
