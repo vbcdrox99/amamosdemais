@@ -953,6 +953,78 @@ const EventDetails = () => {
             )}
           </Card>
 
+          {/* Extra: After / Esquenta */}
+          {(() => {
+            const kind = (event?.extra_kind || "none").toLowerCase();
+            if (kind !== "after" && kind !== "esquenta") return null;
+
+            const venue = event?.extra_venue;
+            const manualLoc = (event?.extra_location || "").trim();
+            // Se não tem venue nem location manual, não exibe
+            if (!venue && !manualLoc) return null;
+
+            const label = kind === "after" ? "🌙 After" : "🔥 Esquenta";
+            const name = venue?.name || manualLoc;
+            const address = venue?.address_text;
+            const transit = venue?.transit_line && venue?.transit_station 
+              ? `${venue.transit_line} — ${venue.transit_station}` 
+              : null;
+            const insta = venue?.instagram_url;
+
+            const handleCopyExtraAddress = async () => {
+                const text = address || name;
+                if (!text) return;
+                try {
+                    await navigator.clipboard.writeText(text);
+                    toast({ title: "Endereço copiado!", description: "Endereço do after/esquenta copiado." });
+                } catch {
+                    toast({ title: "Erro ao copiar", variant: "destructive" });
+                }
+            };
+
+            return (
+              <Card className="p-4 space-y-3 bg-card border-indigo-500/40 shadow-sm">
+                <h3 className="font-semibold text-foreground flex items-center gap-2">
+                  {label} 
+                </h3>
+                <div className="space-y-2 text-sm">
+                   <div className="flex items-start gap-3">
+                      <MapPin className="h-5 w-5 text-indigo-400 mt-0.5" />
+                      <div className="flex-1 space-y-1">
+                        <div className="font-medium text-foreground">{name}</div>
+                        {address && <div className="text-muted-foreground">{address}</div>}
+                        {transit && <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                            <span>🚇</span> {transit}
+                        </div>}
+                        {insta && (
+                            <a 
+                                href={insta} 
+                                target="_blank" 
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 mt-1 font-medium"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-instagram"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
+                                Ver no Instagram
+                            </a>
+                        )}
+                      </div>
+                      {(address || name) && (
+                        <Button
+                            variant="link"
+                            size="icon"
+                            className="h-6 w-6 p-0 text-indigo-400"
+                            onClick={handleCopyExtraAddress}
+                            title="Copiar endereço"
+                        >
+                            <Copy className="h-4 w-4" />
+                        </Button>
+                      )}
+                   </div>
+                </div>
+              </Card>
+            );
+          })()}
+
           
 
           {/* Description */}
