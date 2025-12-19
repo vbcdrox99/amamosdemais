@@ -44,6 +44,7 @@ const EventDetails = () => {
     created_by?: string | null;
     extra_kind?: string | null;
     extra_location?: string | null;
+    extra_timestamp?: string | null;
     instagram_url?: string | null;
     extra_venue?: {
       name: string;
@@ -126,7 +127,7 @@ const EventDetails = () => {
       setLoading(true);
       const { data, error } = await supabase
         .from("events")
-        .select("id,title,description,requirements,aux_links,cover_image_url,event_timestamp,location_text,created_by,extra_kind,extra_location,instagram_url,extra_venue:venues!events_extra_venue_id_fkey(name,address_text,instagram_url,transit_line,transit_station)")
+        .select("id,title,description,requirements,aux_links,cover_image_url,event_timestamp,location_text,created_by,extra_kind,extra_location,instagram_url,extra_timestamp,extra_venue:venues!events_extra_venue_id_fkey(name,address_text,instagram_url,transit_line,transit_station)")
         .eq("id", Number(id))
         .maybeSingle();
       setLoading(false);
@@ -257,6 +258,16 @@ const EventDetails = () => {
     }
   }, [event?.event_timestamp]);
 
+  const extraTimeStr = useMemo(() => {
+    if (!event?.extra_timestamp) return "";
+    try {
+      const d = new Date(event.extra_timestamp);
+      return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return "";
+    }
+  }, [event?.extra_timestamp]);
+
   // Links auxiliares (parse de múltiplos formatos: linhas e vírgulas)
   const auxLinks = useMemo(() => {
     const raw = (event?.aux_links || "").trim();
@@ -327,6 +338,15 @@ const EventDetails = () => {
       if ((kind === "after" || kind === "esquenta") && locName) {
         const label = kind === "after" ? "🌙 After" : "🔥 Esquenta";
         let extraText = `\n\n${label}: ${locName}`;
+        
+        // Adiciona horário se existir
+        if (ev.extra_timestamp) {
+           try {
+             const et = new Date(ev.extra_timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+             extraText += ` às ${et}`;
+           } catch {}
+        }
+
         if (venue) {
            if (venue.transit_line && venue.transit_station) extraText += `\n🚇 ${venue.transit_line} — ${venue.transit_station}`;
            if (venue.address_text) extraText += `\n📍 ${venue.address_text}`;
@@ -363,6 +383,15 @@ const EventDetails = () => {
       if ((kind === "after" || kind === "esquenta") && locName) {
         const label = kind === "after" ? "🌙 After" : "🔥 Esquenta";
         let extraText = `\n\n${label}: ${locName}`;
+
+        // Adiciona horário se existir
+        if (ev.extra_timestamp) {
+           try {
+             const et = new Date(ev.extra_timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+             extraText += ` às ${et}`;
+           } catch {}
+        }
+
         if (venue) {
            if (venue.transit_line && venue.transit_station) extraText += `\n🚇 ${venue.transit_line} — ${venue.transit_station}`;
            if (venue.address_text) extraText += `\n📍 ${venue.address_text}`;
@@ -986,6 +1015,7 @@ const EventDetails = () => {
               <Card className="p-4 space-y-3 bg-card border-indigo-500/40 shadow-sm">
                 <h3 className="font-semibold text-foreground flex items-center gap-2">
                   {label} 
+                  {extraTimeStr && <span className="text-sm font-normal text-muted-foreground ml-auto">{extraTimeStr}</span>}
                 </h3>
                 <div className="space-y-2 text-sm">
                    <div className="flex items-start gap-3">
@@ -1025,9 +1055,56 @@ const EventDetails = () => {
             );
           })()}
 
-          
+          {/* Mini Timeline */}
+          {(() => {
+             if (!extraTimeStr || !timeStr) return null;
+             const kind = (event?.extra_kind || "none").toLowerCase();
+             if (kind !== "esquenta" && kind !== "after") return null;
 
-          {/* Description */}
+             const venue = event?.extra_venue;
+             const extraName = venue?.name || (event?.extra_location || "").trim() || (kind === "esquenta" ? "Esquenta" : "After");
+             const mainName = event?.title || "Evento Principal";
+
+             return (
+               <div className="flex flex-col items-center mt-6 mb-2 space-y-2 w-full">
+                 <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-widest">
+                   <Clock className="h-3 w-3" />
+                   <span>Cronograma</span>
+                 </div>
+                 <div className="flex items-center justify-between gap-4 bg-card/50 p-3 rounded-xl border border-border/50 w-full max-w-md">
+                   {kind === "esquenta" ? (
+                      <>
+                        <div className="flex flex-col items-center flex-1 text-center">
+                          <span className="font-bold text-foreground text-lg">{extraTimeStr}</span>
+                          <span className="text-[10px] uppercase tracking-wider text-indigo-400 font-medium leading-tight line-clamp-2">{extraName}</span>
+                        </div>
+                        <div className="h-0.5 w-12 shrink-0 bg-gradient-to-r from-indigo-500/50 to-primary/50 relative rounded-full">
+                          <div className="absolute -right-1 -top-1.5 text-primary text-[10px]">▶</div>
+                        </div>
+                        <div className="flex flex-col items-center flex-1 text-center">
+                          <span className="font-bold text-foreground text-lg">{timeStr}</span>
+                          <span className="text-[10px] uppercase tracking-wider text-primary font-medium leading-tight line-clamp-2">{mainName}</span>
+                        </div>
+                      </>
+                   ) : (
+                      <>
+                        <div className="flex flex-col items-center flex-1 text-center">
+                          <span className="font-bold text-foreground text-lg">{timeStr}</span>
+                          <span className="text-[10px] uppercase tracking-wider text-primary font-medium leading-tight line-clamp-2">{mainName}</span>
+                        </div>
+                        <div className="h-0.5 w-12 shrink-0 bg-gradient-to-r from-primary/50 to-indigo-500/50 relative rounded-full">
+                          <div className="absolute -right-1 -top-1.5 text-indigo-400 text-[10px]">▶</div>
+                        </div>
+                        <div className="flex flex-col items-center flex-1 text-center">
+                          <span className="font-bold text-foreground text-lg">{extraTimeStr}</span>
+                          <span className="text-[10px] uppercase tracking-wider text-indigo-400 font-medium leading-tight line-clamp-2">{extraName}</span>
+                        </div>
+                      </>
+                   )}
+                 </div>
+               </div>
+             );
+          })()}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-foreground">Descrição</h3>
@@ -1399,7 +1476,9 @@ const EventDetails = () => {
                 })}
               </div>
             )}
-            <div className="text-xs text-muted-foreground">Verde: VOU • Amarelo: TALVEZ • Vermelho: NÃO VOU</div>
+            {!isCheckinWindow && (
+              <div className="text-xs text-muted-foreground">Verde: VOU • Amarelo: TALVEZ • Vermelho: NÃO VOU</div>
+            )}
           </div>
 
           {/* Suggested same-day events */}

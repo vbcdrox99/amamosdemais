@@ -51,6 +51,11 @@ const CreateEvent = () => {
   const [selectedHour, setSelectedHour] = useState<string | null>(null);
   const [selectedMinute, setSelectedMinute] = useState<string | null>(null);
   const selectedTimeStr = useMemo(() => (selectedHour && selectedMinute ? `${selectedHour}:${selectedMinute}` : ""), [selectedHour, selectedMinute]);
+  
+  const [extraHour, setExtraHour] = useState<string | null>(null);
+  const [extraMinute, setExtraMinute] = useState<string | null>(null);
+  const extraTimeStr = useMemo(() => (extraHour && extraMinute ? `${extraHour}:${extraMinute}` : ""), [extraHour, extraMinute]);
+
   const [extraKind, setExtraKind] = useState<"none" | "esquenta" | "after">("none");
   const [extraLocation, setExtraLocation] = useState<string>("");
   // Estação de metrô/trem próxima (São Paulo) - seleção em dois níveis
@@ -346,6 +351,12 @@ const CreateEvent = () => {
           eventTimestamp = iso;
         }
 
+        let extraTimestamp: string | null = null;
+        if (date && extraTimeStr && (extraKind === "esquenta" || extraKind === "after")) {
+          const iso = new Date(`${date}T${extraTimeStr}:00`).toISOString();
+          extraTimestamp = iso;
+        }
+
         // Faz upload da capa no Storage e obtém URL pública
         let coverPublicUrl: string | null = null;
         try {
@@ -387,6 +398,7 @@ const CreateEvent = () => {
           created_by: profile?.id ?? null,
           extra_kind: extraKind,
           extra_location: extraKind === "none" ? null : (extraLocation || null),
+          extra_timestamp: extraTimestamp,
         };
 
         const { error } = await supabase.from("events").insert(payload);
@@ -440,6 +452,21 @@ const CreateEvent = () => {
                 value={eventName}
                 onChange={(e) => {
                   const val = e.target.value;
+                  const words = val.trim().split(/\s+/);
+                  if (words.length > 4 && val.endsWith(" ")) {
+                    // Prevent adding more words if we already have 4
+                    return;
+                  }
+                  // Allow typing but if pasting or finishing a word, check count
+                  if (words.length > 4) {
+                    // If user pasted or typed fast, truncate to 4 words
+                    // But we need to be careful not to break typing a single long word or editing
+                    // Let's just enforce max 4 words by joining the first 4
+                    const truncated = words.slice(0, 4).join(" ");
+                    setEventName(truncated);
+                    return;
+                  }
+
                   setEventName(val);
                   if (selectedVenueId) {
                     const sel = venues.find((v) => v.id === selectedVenueId);
@@ -880,6 +907,59 @@ const CreateEvent = () => {
                     >
                       Cadastrar novo Local
                     </Button>
+                  </div>
+                  
+                  {/* Horário do Esquenta/After */}
+                  <div className="space-y-2 pt-2">
+                    <Label className="text-white">Horário do {extraKind === "esquenta" ? "Esquenta" : "After"}</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full justify-start bg-white/10 border-white/20 text-white hover:bg-white/10"
+                        >
+                          <ClockIcon className="mr-2 h-4 w-4" />
+                          {extraTimeStr ? extraTimeStr : "Selecione o horário"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-full sm:w-[260px] max-w-[calc(100vw-2rem)] bg-black/90 border-white/20">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-white/80">Hora</Label>
+                            <Select value={extraHour ?? undefined} onValueChange={(v) => setExtraHour(v)}>
+                              <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
+                                <SelectValue placeholder="HH" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Array.from({ length: 24 }).map((_, i) => {
+                                  const hh = String(i).padStart(2, "0");
+                                  return (
+                                    <SelectItem key={hh} value={hh}>{hh}</SelectItem>
+                                  );
+                                })}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-white/80">Minuto</Label>
+                            <Select value={extraMinute ?? undefined} onValueChange={(v) => setExtraMinute(v)}>
+                              <SelectTrigger className="mt-1 w-full bg-white/10 border-white/20 text-white hover:bg-white/10">
+                                <SelectValue placeholder="MM" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {[0, 15, 30, 45].map((i) => {
+                                  const mm = String(i).padStart(2, "0");
+                                  return (
+                                    <SelectItem key={mm} value={mm}>{mm}</SelectItem>
+                                  );
+                                })}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
               )}
