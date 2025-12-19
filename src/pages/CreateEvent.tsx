@@ -45,6 +45,8 @@ const CreateEvent = () => {
   const [newVenueTransitStation, setNewVenueTransitStation] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [stationOpen, setStationOpen] = useState(false);
+  const [venueTarget, setVenueTarget] = useState<"main" | "extra">("main");
+  const [selectedExtraVenueId, setSelectedExtraVenueId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<string | null>(null);
   const [selectedMinute, setSelectedMinute] = useState<string | null>(null);
@@ -255,6 +257,12 @@ const CreateEvent = () => {
     return venues.filter((v) => v.name.toLowerCase().includes(q)).slice(0, 5);
   }, [eventName, venues]);
 
+  const filteredExtraVenues = useMemo(() => {
+    const q = extraLocation.trim().toLowerCase();
+    if (!q) return [];
+    return venues.filter((v) => v.name.toLowerCase().includes(q)).slice(0, 5);
+  }, [extraLocation, venues]);
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -375,6 +383,7 @@ const CreateEvent = () => {
           location_text: locationTextFinal || null,
           instagram_url: instagramUrl || null,
           venue_id: selectedVenueId || null,
+          extra_venue_id: selectedExtraVenueId || null,
           created_by: profile?.id ?? null,
           extra_kind: extraKind,
           extra_location: extraKind === "none" ? null : (extraLocation || null),
@@ -470,6 +479,7 @@ const CreateEvent = () => {
                         setNewVenueAddress("");
                         setNewVenueInstagram("");
                         setShowNewVenue(false);
+                        setVenueTarget("main");
                         setNewVenueDialogOpen(true);
                       }}
                     >
@@ -514,6 +524,7 @@ const CreateEvent = () => {
                 setNewVenueAddress("");
                 setNewVenueInstagram("");
                 setShowNewVenue(false);
+                setVenueTarget("main");
                 setNewVenueDialogOpen(true);
               }}
             >
@@ -683,12 +694,17 @@ const CreateEvent = () => {
                       if (data) {
                         const d = data as VenueRow;
                         setVenues((prev) => [...prev, d]);
-                        setSelectedVenueId(d.id);
-                        setEventName(d.name);
-                        setLocationName(d.address_text ?? "");
-                        setInstagramUrl(d.instagram_url ?? "");
-                        setSelectedTransitLine(d.transit_line ?? null);
-                        setSelectedTransitStation(d.transit_station ?? null);
+                        if (venueTarget === "main") {
+                          setSelectedVenueId(d.id);
+                          setEventName(d.name);
+                          setLocationName(d.address_text ?? "");
+                          setInstagramUrl(d.instagram_url ?? "");
+                          setSelectedTransitLine(d.transit_line ?? null);
+                          setSelectedTransitStation(d.transit_station ?? null);
+                        } else {
+                          setSelectedExtraVenueId(d.id);
+                          setExtraLocation(d.name);
+                        }
                         setNewVenueDialogOpen(false);
                         setShowNewVenue(false);
                         setNewVenueName("");
@@ -771,13 +787,101 @@ const CreateEvent = () => {
                 <ToggleGroupItem value="none" className="bg-white/10 border-white/20 text-white hover:bg-white/10">Nenhum</ToggleGroupItem>
               </ToggleGroup>
               {(extraKind === "esquenta" || extraKind === "after") && (
-                <Input
-                  id="extra_location"
-                  value={extraLocation}
-                  onChange={(e) => setExtraLocation(e.target.value)}
-                  placeholder={extraKind === "esquenta" ? "Onde será o esquenta?" : "Onde será o after?"}
-                  className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
-                />
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Input
+                      id="extra_location"
+                      value={extraLocation}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setExtraLocation(val);
+                        if (selectedExtraVenueId) {
+                          const sel = venues.find((v) => v.id === selectedExtraVenueId);
+                          if (sel && val.trim() !== (sel.name ?? "")) {
+                            setSelectedExtraVenueId(null);
+                          }
+                        }
+                      }}
+                      placeholder={extraKind === "esquenta" ? "Onde será o esquenta?" : "Onde será o after?"}
+                      className="bg-white/10 border-white/20 text-white placeholder:text-white/60"
+                    />
+                    {filteredExtraVenues.length > 0 && !selectedExtraVenueId && extraLocation.trim().length > 0 && (
+                      <div className="absolute z-20 mt-1 w-full rounded-md border border-white/20 bg-black/90 backdrop-blur-sm">
+                        {filteredExtraVenues.map((v) => (
+                          <button
+                            type="button"
+                            key={v.id}
+                            className="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/10"
+                            onClick={() => {
+                              setSelectedExtraVenueId(v.id);
+                              setExtraLocation(v.name);
+                            }}
+                          >
+                            {v.name}
+                          </button>
+                        ))}
+                        <div className="h-px bg-white/10" />
+                        <div className="px-3 py-2">
+                          <button
+                            type="button"
+                            className="w-full text-left text-xs text-white/80 hover:bg-white/10 px-2 py-2 rounded"
+                            onClick={() => {
+                              setNewVenueName(extraLocation.trim());
+                              setNewVenueAddress("");
+                              setNewVenueInstagram("");
+                              setShowNewVenue(false);
+                              setVenueTarget("extra");
+                              setNewVenueDialogOpen(true);
+                            }}
+                          >
+                            Cadastrar novo Local com este nome
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedExtraVenueId && (() => {
+                    const v = venues.find((vv) => vv.id === selectedExtraVenueId);
+                    if (!v) return null;
+                    return (
+                      <div className="mt-1 rounded-md border border-white/20 bg-black/70 p-3 text-sm">
+                        <div className="text-white/90 font-medium">Local selecionado</div>
+                        <div className="mt-1 text-white/80">Nome: {v.name}</div>
+                        {v.address_text && (
+                          <div className="mt-1 text-white/80">Endereço: {v.address_text}</div>
+                        )}
+                        {v.instagram_url && (
+                          <div className="mt-1 text-white/80">
+                            Instagram / Site: {v.instagram_url.startsWith("http") ? (
+                              <a href={v.instagram_url} target="_blank" rel="noreferrer" className="underline">{v.instagram_url}</a>
+                            ) : (
+                              v.instagram_url
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  <div className="mt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 px-3 border-white/30 text-white hover:bg-white/10 bg-gradient-to-r from-emerald-600/30 to-sky-600/30"
+                      onClick={() => {
+                        setNewVenueName(extraLocation.trim());
+                        setNewVenueAddress("");
+                        setNewVenueInstagram("");
+                        setShowNewVenue(false);
+                        setVenueTarget("extra");
+                        setNewVenueDialogOpen(true);
+                      }}
+                    >
+                      Cadastrar novo Local
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
 

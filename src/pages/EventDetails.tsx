@@ -44,6 +44,14 @@ const EventDetails = () => {
     created_by?: string | null;
     extra_kind?: string | null;
     extra_location?: string | null;
+    instagram_url?: string | null;
+    extra_venue?: {
+      name: string;
+      address_text: string | null;
+      instagram_url: string | null;
+      transit_line: string | null;
+      transit_station: string | null;
+    } | null;
   };
 
   const [event, setEvent] = useState<EventRow | null>(null);
@@ -93,13 +101,32 @@ const EventDetails = () => {
     // Recarrega quando o RSVP ou o check-in do usuário muda
   }, [id, rsvpStatus, checkinConfirmed]);
 
+  // Realtime updates para participantes
+  useEffect(() => {
+    if (!id) return;
+    const channel = supabase
+      .channel(`event-rsvps-${id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "event_rsvps", filter: `event_id=eq.${id}` },
+        () => {
+          loadParticipants();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id]);
+
   useEffect(() => {
     const load = async () => {
       if (!id) return;
       setLoading(true);
       const { data, error } = await supabase
         .from("events")
-        .select("id,title,description,requirements,aux_links,cover_image_url,event_timestamp,location_text,created_by,extra_kind,extra_location")
+        .select("id,title,description,requirements,aux_links,cover_image_url,event_timestamp,location_text,created_by,extra_kind,extra_location,instagram_url,extra_venue:venues!events_extra_venue_id_fkey(name,address_text,instagram_url,transit_line,transit_station)")
         .eq("id", Number(id))
         .maybeSingle();
       setLoading(false);
@@ -281,13 +308,31 @@ const EventDetails = () => {
     const when = `${dateStr}${timeStr ? ` às ${timeStr}` : ""}`;
     const where = ev.location_text ?? "local a definir";
     const desc = (ev.description || "").trim();
-    const base = `${ev.title} — ${when} em ${where}`.trim();
+    let base = `${ev.title} — ${when} em ${where}`.trim();
+
+    // Main Event Extras
+    const mainInfos: string[] = [];
+    if (ev.instagram_url) mainInfos.push(`📸 Insta: ${ev.instagram_url}`);
+    if (ev.aux_links) {
+      const links = ev.aux_links.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+      if (links.length > 0) mainInfos.push(`🔗 Mais: ${links.join(" ")}`);
+    }
+    if (mainInfos.length > 0) base += `\n${mainInfos.join("\n")}`;
+
     const extras = (() => {
       const kind = (ev.extra_kind || "none").toLowerCase();
-      const loc = (ev.extra_location || "").trim();
-      if ((kind === "after" || kind === "esquenta") && loc) {
-        const label = kind === "after" ? "After" : "Esquenta";
-        return `\n\nO ${label} vai ser ${loc}`;
+      const venue = ev.extra_venue;
+      const locName = venue ? venue.name : (ev.extra_location || "").trim();
+
+      if ((kind === "after" || kind === "esquenta") && locName) {
+        const label = kind === "after" ? "🌙 After" : "🔥 Esquenta";
+        let extraText = `\n\n${label}: ${locName}`;
+        if (venue) {
+           if (venue.transit_line && venue.transit_station) extraText += `\n🚇 ${venue.transit_line} — ${venue.transit_station}`;
+           if (venue.address_text) extraText += `\n📍 ${venue.address_text}`;
+           if (venue.instagram_url) extraText += `\n📸 ${venue.instagram_url}`;
+        }
+        return extraText;
       }
       return "";
     })();
@@ -299,13 +344,31 @@ const EventDetails = () => {
     const when = `${dateStr}${timeStr ? ` às ${timeStr}` : ""}`;
     const where = ev.location_text ?? "local a definir";
     const desc = (ev.description || "").trim();
-    const base = `Check-in aberto! ${ev.title} — ${when} em ${where}. Faça seu check-in ao chegar 👊`.trim();
+    let base = `Check-in aberto! ${ev.title} — ${when} em ${where}. Faça seu check-in ao chegar 👊`.trim();
+
+    // Main Event Extras
+    const mainInfos: string[] = [];
+    if (ev.instagram_url) mainInfos.push(`📸 Insta: ${ev.instagram_url}`);
+    if (ev.aux_links) {
+      const links = ev.aux_links.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+      if (links.length > 0) mainInfos.push(`🔗 Mais: ${links.join(" ")}`);
+    }
+    if (mainInfos.length > 0) base += `\n${mainInfos.join("\n")}`;
+
     const extras = (() => {
       const kind = (ev.extra_kind || "none").toLowerCase();
-      const loc = (ev.extra_location || "").trim();
-      if ((kind === "after" || kind === "esquenta") && loc) {
-        const label = kind === "after" ? "After" : "Esquenta";
-        return `\n\nO ${label} vai ser ${loc}`;
+      const venue = ev.extra_venue;
+      const locName = venue ? venue.name : (ev.extra_location || "").trim();
+
+      if ((kind === "after" || kind === "esquenta") && locName) {
+        const label = kind === "after" ? "🌙 After" : "🔥 Esquenta";
+        let extraText = `\n\n${label}: ${locName}`;
+        if (venue) {
+           if (venue.transit_line && venue.transit_station) extraText += `\n🚇 ${venue.transit_line} — ${venue.transit_station}`;
+           if (venue.address_text) extraText += `\n📍 ${venue.address_text}`;
+           if (venue.instagram_url) extraText += `\n📸 ${venue.instagram_url}`;
+        }
+        return extraText;
       }
       return "";
     })();
@@ -1166,11 +1229,12 @@ const EventDetails = () => {
                           <SelectValue placeholder="MM" />
                         </SelectTrigger>
                         <SelectContent>
-                          {[0, 30].map((i) => {
-                            const mm = String(i).padStart(2, "0");
-                            return <SelectItem key={mm} value={mm}>{mm}</SelectItem>;
-                          })}
-                        </SelectContent>
+                        {Array.from({ length: 12 }).map((_, i) => {
+                          const val = i * 5;
+                          const mm = String(val).padStart(2, "0");
+                          return <SelectItem key={mm} value={mm}>{mm}</SelectItem>;
+                        })}
+                      </SelectContent>
                       </Select>
                     </div>
                   </div>
