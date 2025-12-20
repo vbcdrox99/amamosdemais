@@ -451,7 +451,9 @@ const EventDetails = () => {
         user_id: profile.id,
         arrival_time: label,
       };
-      if (rsvpStatus) payload.status = rsvpStatus;
+      // Se o usuário ainda não confirmou, assume "going" ao escolher um horário
+      payload.status = rsvpStatus || "going";
+      
       const { error } = await supabase
         .from("event_rsvps")
         .upsert(payload, { onConflict: "event_id,user_id" });
@@ -463,29 +465,15 @@ const EventDetails = () => {
     }
   };
 
-  // Regra: criador do evento automaticamente fica como VOU e com horário fixado
+  // (Regra removida: criador agora tem liberdade para alterar horário e status)
+  /*
   useEffect(() => {
     const applyCreatorDefaults = async () => {
-      if (!isCreator || !fixedTimeLabel || !profile?.id || !id) return;
-      const needsStatus = rsvpStatus !== "going";
-      const needsArrival = (myRsvp?.arrival_time || "") !== fixedTimeLabel;
-      if (!needsStatus && !needsArrival) return;
-      try {
-        const { error } = await supabase
-          .from("event_rsvps")
-          .upsert({
-            event_id: Number(id),
-            user_id: profile.id,
-            status: "going",
-            arrival_time: fixedTimeLabel,
-          }, { onConflict: "event_id,user_id" });
-        if (error) throw error;
-        setRsvpStatus("going");
-        await loadParticipants();
-      } catch {}
+      // ...
     };
     applyCreatorDefaults();
-  }, [isCreator, fixedTimeLabel, rsvpStatus, myRsvp?.arrival_time, profile?.id, id]);
+  }, ...);
+  */
 
   // Assina mudanças em tempo real para atualizar os grupos de horários
   useEffect(() => {
