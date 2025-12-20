@@ -1437,21 +1437,24 @@ const EventDetails = () => {
               <div className="text-center text-muted-foreground py-6">Ainda ninguém confirmou presença.</div>
             )}
             {!participantsLoading && participants.length > 0 && (
-              <div className="flex flex-wrap gap-4">
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-y-6 gap-x-2">
                 {participants.map((p) => {
                   const name = p.full_name || formatPhoneBR(p.phone_number || "");
                   const initials = (name || "?").slice(0, 2).toUpperCase();
-                  const ringClass =
+                  
+                  // Anel de status estilo Stories (mais elegante)
+                  const ringColor =
                     p.status === "going"
-                      ? "ring-[3px] ring-emerald-400/60"
+                      ? "ring-emerald-500"
                       : p.status === "maybe"
-                      ? "ring-[3px] ring-amber-400/60"
-                      : "ring-[3px] ring-rose-400/60";
+                      ? "ring-amber-500"
+                      : "ring-rose-500";
+
                   const canViewProfile = !!permissions?.canEditOwnProfile;
                   return (
                     <button
                       key={`${p.user_id}-${p.status}`}
-                      className="flex items-center gap-2"
+                      className="flex flex-col items-center group"
                       type="button"
                       onClick={() => {
                         if (!canViewProfile) return;
@@ -1460,17 +1463,21 @@ const EventDetails = () => {
                       }}
                       disabled={!canViewProfile}
                     >
-                      <Avatar className={`h-10 w-10 ${ringClass}`}>
-                        {p.avatar_url ? (
-                          <AvatarImage src={p.avatar_url} alt={name} />
-                        ) : (
-                          <AvatarImage src={undefined} alt={name} />
-                        )}
-                        <AvatarFallback className="text-xs bg-white/10 text-foreground">
-                          {initials}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="text-xs text-muted-foreground">{name}</div>
+                      <div className={`p-0.5 rounded-full ring-2 ring-offset-2 ring-offset-background ${ringColor} transition-transform group-hover:scale-105`}>
+                        <Avatar className="h-14 w-14 border-2 border-background">
+                          {p.avatar_url ? (
+                            <AvatarImage src={p.avatar_url} alt={name} className="object-cover" />
+                          ) : (
+                            <AvatarImage src={undefined} alt={name} />
+                          )}
+                          <AvatarFallback className="text-sm bg-muted text-foreground font-medium">
+                            {initials}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
+                      <div className="mt-2 text-xs font-medium text-center line-clamp-1 w-full text-foreground/80 group-hover:text-foreground transition-colors">
+                        {name}
+                      </div>
                     </button>
                   );
                 })}
@@ -1499,7 +1506,7 @@ const EventDetails = () => {
                           src={ev.cover_image_url ?? "/placeholder.svg"}
                           onError={(e) => { e.currentTarget.src = "/placeholder.svg"; }}
                           alt={ev.title}
-                          className="h-16 w-24 object-cover rounded-md"
+                          className="h-20 w-20 aspect-square object-cover rounded-md"
                         />
                         <div className="flex-1">
                           <div className="text-sm font-medium text-foreground line-clamp-2">{ev.title}</div>
