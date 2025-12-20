@@ -179,34 +179,6 @@ export default function ProfileQuickView({ userId, open, onOpenChange, highlight
                     </div>
                   </div>
                 )}
-                {/* Talvez */}
-                {rsvps.some((r) => r.status === "maybe") && (
-                  <div className="space-y-1">
-                    <div className="text-[11px] text-white/60">Talvez</div>
-                    <div className="flex flex-wrap gap-2">
-                      {rsvps.filter((r) => r.status === "maybe").map((r) => (
-                        <Link key={`m-${r.event_id}`} to={`/evento/${r.events?.id ?? r.event_id}`} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs bg-amber-600/10 hover:bg-amber-600/20 border border-amber-500/30">
-                          <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
-                          <span className="text-foreground">{truncateWords(r.events?.title ?? `Rolê ${r.event_id}`, 6)}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {/* Não vou */}
-                {rsvps.some((r) => r.status === "not-going") && (
-                  <div className="space-y-1">
-                    <div className="text-[11px] text-white/60">Não vou</div>
-                    <div className="flex flex-wrap gap-2">
-                      {rsvps.filter((r) => r.status === "not-going").map((r) => (
-                        <Link key={`n-${r.event_id}`} to={`/evento/${r.events?.id ?? r.event_id}`} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs bg-rose-600/10 hover:bg-rose-600/20 border border-rose-500/30">
-                          <span className="h-1.5 w-1.5 rounded-full bg-rose-300" />
-                          <span className="text-foreground">{truncateWords(r.events?.title ?? `Rolê ${r.event_id}`, 6)}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
